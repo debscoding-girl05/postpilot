@@ -60,6 +60,36 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="PostPilot", lifespan=lifespan)
+
+# Optional HTTP Basic auth — set APP_PASSWORD to protect the whole app when it's
+# exposed (e.g. via a public tunnel). Unset = no auth (safe for localhost-only use).
+APP_PASSWORD = os.getenv("APP_PASSWORD")
+
+
+@app.middleware("http")
+async def _basic_auth(request, call_next):
+    if APP_PASSWORD and request.url.path != "/health":
+        import base64
+        import secrets
+
+        ok = False
+        header = request.headers.get("authorization", "")
+        if header.startswith("Basic "):
+            try:
+                _user, _, pw = base64.b64decode(header[6:]).decode().partition(":")
+                ok = secrets.compare_digest(pw, APP_PASSWORD)
+            except Exception:
+                ok = False
+        if not ok:
+            from starlette.responses import Response
+
+            return Response(
+                "Authentication required", status_code=401,
+                headers={"WWW-Authenticate": 'Basic realm="PostPilot"'},
+            )
+    return await call_next(request)
+
+
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
 
