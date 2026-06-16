@@ -1,0 +1,928 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>PostPilot</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            base: "#0b0e14",
+            surface: "#141925",
+            surfacehi: "#1d2433",
+            accent: "#7c5cff",
+            accenthi: "#9277ff",
+            muted: "#94a0b8",
+          },
+          fontFamily: {
+            sans: ['"Plus Jakarta Sans"', "system-ui", "sans-serif"],
+            display: ['"Space Grotesk"', "system-ui", "sans-serif"],
+          },
+        },
+      },
+    };
+  </script>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet" />
+  <script src="https://code.iconify.design/iconify-icon/2.1.0/iconify-icon.min.js"></script>
+  <script defer src="https://unpkg.com/alpinejs@3/dist/cdn.min.js"></script>
+  <style>
+    [x-cloak] { display: none !important; }
+    html, body { background: #0b0e14; color: #e8ebf2; font-family: "Plus Jakarta Sans", system-ui, sans-serif; }
+    .font-display { font-family: "Space Grotesk", system-ui, sans-serif; }
+    iconify-icon { display: inline-block; vertical-align: -0.125em; }
+
+    ::-webkit-scrollbar { width: 9px; height: 9px; }
+    ::-webkit-scrollbar-thumb { background: #2a3344; border-radius: 5px; }
+    ::-webkit-scrollbar-thumb:hover { background: #38445b; }
+
+    /* Soft ambient glow behind the app */
+    body::before {
+      content: ""; position: fixed; inset: 0; z-index: -1; pointer-events: none;
+      background:
+        radial-gradient(60rem 40rem at 85% -10%, rgba(124,92,255,.10), transparent 60%),
+        radial-gradient(50rem 40rem at -10% 110%, rgba(34,211,238,.06), transparent 55%);
+    }
+
+    /* Cards */
+    .card { background:#141925; border:1px solid rgba(255,255,255,.06); border-radius:1rem;
+            transition: transform .2s ease, box-shadow .2s ease, border-color .2s ease; }
+    .card-hover:hover { transform: translateY(-3px); border-color: rgba(124,92,255,.45);
+            box-shadow: 0 12px 34px rgba(2,4,10,.5); }
+
+    /* Inputs */
+    .inp { background:#0f1420; border:1px solid rgba(255,255,255,.07); border-radius:.7rem;
+           color:#e8ebf2; transition:border-color .15s, box-shadow .15s; }
+    .inp:focus { outline:none; border-color:#7c5cff; box-shadow:0 0 0 3px rgba(124,92,255,.18); }
+
+    /* Buttons */
+    .btn { display:inline-flex; align-items:center; justify-content:center; gap:.45rem;
+           border-radius:.7rem; font-weight:600; transition:all .15s ease; cursor:pointer; }
+    .btn:active { transform: scale(.97); }
+    .btn:disabled { opacity:.5; cursor:not-allowed; }
+    .btn-accent { background:#7c5cff; color:#fff; }
+    .btn-accent:hover:not(:disabled) { background:#9277ff; box-shadow:0 8px 22px rgba(124,92,255,.35); }
+    .btn-ghost { background:rgba(255,255,255,.05); color:#cdd5e3; border:1px solid rgba(255,255,255,.07); }
+    .btn-ghost:hover:not(:disabled) { background:rgba(255,255,255,.1); }
+    .btn-soft { background:rgba(124,92,255,.14); color:#c4b8ff; border:1px solid rgba(124,92,255,.3); }
+    .btn-soft:hover:not(:disabled) { background:rgba(124,92,255,.24); }
+
+    /* Nav link */
+    .navlink { transition: background .15s, color .15s; }
+
+    /* Animations */
+    @keyframes fadeUp { from { opacity:0; transform: translateY(10px); } to { opacity:1; transform:none; } }
+    .fadeup { animation: fadeUp .45s cubic-bezier(.2,.7,.2,1) both; }
+    .stagger > * { animation: fadeUp .45s cubic-bezier(.2,.7,.2,1) both; }
+    .stagger > *:nth-child(1){animation-delay:.02s}
+    .stagger > *:nth-child(2){animation-delay:.06s}
+    .stagger > *:nth-child(3){animation-delay:.10s}
+    .stagger > *:nth-child(4){animation-delay:.14s}
+    .stagger > *:nth-child(5){animation-delay:.18s}
+    .stagger > *:nth-child(6){animation-delay:.22s}
+    .skeleton { background:linear-gradient(90deg,#141925 25%,#1d2433 50%,#141925 75%); background-size:200% 100%; animation: sk 1.2s infinite; }
+    @keyframes sk { 0%{background-position:200% 0} 100%{background-position:-200% 0} }
+    .spin { animation: spin 1s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+  </style>
+</head>
+<body class="min-h-screen" x-data="postpilot()" x-init="init()">
+
+  <!-- Media preview lightbox -->
+  <div x-show="preview.open" x-cloak x-transition.opacity
+       @keydown.escape.window="closePreview()" @click="closePreview()"
+       class="fixed inset-0 z-[60] bg-black/85 backdrop-blur-sm flex items-center justify-center p-4">
+    <div class="relative max-w-3xl w-full" @click.stop>
+      <button @click="closePreview()"
+        class="absolute -top-3 -right-3 bg-surfacehi hover:bg-surface rounded-full w-10 h-10 text-white shadow-lg flex items-center justify-center">
+        <iconify-icon icon="fluent:dismiss-24-regular" class="text-xl"></iconify-icon>
+      </button>
+      <template x-if="preview.item && isVideo(preview.item)">
+        <video :src="preview.item.url" controls autoplay playsinline class="w-full max-h-[82vh] rounded-2xl bg-black"></video>
+      </template>
+      <template x-if="preview.item && !isVideo(preview.item)">
+        <img :src="preview.item.url" class="w-full max-h-[82vh] object-contain rounded-2xl" />
+      </template>
+      <p class="text-center text-xs text-muted mt-2" x-text="preview.item ? preview.item.filename : ''"></p>
+    </div>
+  </div>
+
+  <!-- Toasts -->
+  <div class="fixed top-4 right-4 z-50 space-y-2" x-cloak>
+    <template x-for="t in toasts" :key="t.id">
+      <div class="fadeup flex items-center gap-2 px-4 py-3 rounded-xl shadow-lg text-sm font-medium max-w-xs border"
+           :class="t.type==='error' ? 'bg-red-950/90 border-red-700/60 text-red-200' : 'bg-emerald-950/90 border-emerald-700/60 text-emerald-200'">
+        <iconify-icon :icon="t.type==='error' ? 'fluent:error-circle-24-filled' : 'fluent:checkmark-circle-24-filled'" class="text-lg shrink-0"></iconify-icon>
+        <span x-text="t.msg"></span>
+      </div>
+    </template>
+  </div>
+
+  <div class="flex min-h-screen">
+
+    <!-- Desktop sidebar -->
+    <aside class="hidden md:flex flex-col w-64 bg-surface/70 backdrop-blur border-r border-white/5 p-4 fixed h-full">
+      <div class="flex items-center gap-2.5 mb-9 px-2 pt-2">
+        <div class="w-9 h-9 rounded-xl bg-gradient-to-br from-accent to-cyan-400 flex items-center justify-center shadow-lg shadow-accent/30">
+          <iconify-icon icon="fluent:rocket-24-filled" class="text-white text-xl"></iconify-icon>
+        </div>
+        <span class="text-xl font-bold font-display tracking-tight">PostPilot</span>
+      </div>
+      <nav class="space-y-1 flex-1">
+        <template x-for="item in nav" :key="item.id">
+          <button @click="view=item.id"
+            class="navlink w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-left text-[15px]"
+            :class="view===item.id ? 'bg-accent text-white shadow-lg shadow-accent/25' : 'text-slate-300 hover:bg-white/5'">
+            <iconify-icon :icon="item.icon" class="text-xl"></iconify-icon>
+            <span x-text="item.label"></span>
+          </button>
+        </template>
+      </nav>
+      <div class="flex items-center gap-2 text-xs text-muted px-3 py-2 rounded-lg bg-white/5">
+        <span class="w-2 h-2 rounded-full bg-emerald-400"></span>
+        <span><span x-text="accounts.filter(a=>a.connected).length"></span> connected</span>
+      </div>
+    </aside>
+
+    <!-- Main content -->
+    <main class="flex-1 md:ml-64 pb-24 md:pb-0">
+      <header class="md:hidden sticky top-0 z-30 bg-surface/80 backdrop-blur border-b border-white/5 px-4 py-3 flex items-center gap-2.5">
+        <div class="w-8 h-8 rounded-lg bg-gradient-to-br from-accent to-cyan-400 flex items-center justify-center">
+          <iconify-icon icon="fluent:rocket-24-filled" class="text-white text-lg"></iconify-icon>
+        </div>
+        <span class="font-bold font-display">PostPilot</span>
+      </header>
+
+      <div class="max-w-4xl mx-auto p-4 md:p-8">
+
+        <!-- ===================== DASHBOARD ===================== -->
+        <section x-show="view==='dashboard'" x-transition.opacity.duration.300ms x-cloak>
+          <h1 class="text-2xl font-bold font-display mb-6 fadeup">Dashboard</h1>
+          <div class="grid grid-cols-3 gap-3 mb-9 stagger">
+            <div class="card card-hover p-4">
+              <iconify-icon icon="fluent:calendar-clock-24-regular" class="text-accenthi text-2xl mb-1"></iconify-icon>
+              <div class="text-3xl font-bold font-display" x-text="stats.scheduled"></div>
+              <div class="text-xs text-muted mt-1">Scheduled</div>
+            </div>
+            <div class="card card-hover p-4">
+              <iconify-icon icon="fluent:checkmark-circle-24-regular" class="text-emerald-400 text-2xl mb-1"></iconify-icon>
+              <div class="text-3xl font-bold font-display text-emerald-300" x-text="stats.postedToday"></div>
+              <div class="text-xs text-muted mt-1">Posted today</div>
+            </div>
+            <div class="card card-hover p-4">
+              <iconify-icon icon="fluent:link-24-regular" class="text-cyan-400 text-2xl mb-1"></iconify-icon>
+              <div class="text-3xl font-bold font-display text-cyan-300" x-text="accounts.filter(a=>a.connected).length"></div>
+              <div class="text-xs text-muted mt-1">Platforms</div>
+            </div>
+          </div>
+
+          <div class="flex items-center gap-2 mb-3">
+            <iconify-icon icon="fluent:calendar-arrow-right-24-regular" class="text-muted text-lg"></iconify-icon>
+            <h2 class="text-lg font-semibold font-display">Upcoming</h2>
+          </div>
+          <div class="space-y-3 mb-9">
+            <template x-if="loading"><div class="skeleton h-20 rounded-2xl"></div></template>
+            <template x-for="p in upcoming" :key="p.id">
+              <div class="card card-hover p-4 fadeup">
+                <div class="flex justify-between items-start gap-3">
+                  <div class="flex-1 min-w-0">
+                    <div class="flex gap-2 mb-1.5">
+                      <template x-for="pl in p.platforms" :key="pl">
+                        <iconify-icon :icon="pIcon(pl)" :style="'color:'+brand(pl)" :title="pName(pl)" class="text-lg"></iconify-icon>
+                      </template>
+                    </div>
+                    <p class="text-sm text-slate-200 truncate" x-text="p.content"></p>
+                    <p class="text-xs text-muted mt-1 flex items-center gap-1">
+                      <iconify-icon icon="fluent:clock-24-regular"></iconify-icon>
+                      <span x-text="fmt(p.scheduled_for)"></span>
+                    </p>
+                    <div class="flex gap-1.5 mt-2.5" x-show="p.media_paths && p.media_paths.length">
+                      <template x-for="path in (p.media_paths||[])" :key="path">
+                        <div class="relative w-12 h-12 cursor-pointer" @click="openPreview(mediaItem(path))" title="Click to preview">
+                          <template x-if="isVideo({filename:path})">
+                            <div class="relative w-12 h-12">
+                              <video :src="mediaItem(path).url" class="w-12 h-12 object-cover rounded-lg bg-black" muted playsinline preload="metadata"></video>
+                              <span class="absolute inset-0 flex items-center justify-center text-white pointer-events-none"><iconify-icon icon="fluent:play-circle-24-filled"></iconify-icon></span>
+                            </div>
+                          </template>
+                          <template x-if="!isVideo({filename:path})">
+                            <img :src="mediaItem(path).url" class="w-12 h-12 object-cover rounded-lg" />
+                          </template>
+                        </div>
+                      </template>
+                    </div>
+                  </div>
+                  <div class="flex gap-2 shrink-0">
+                    <button @click="postNow(p.id)" class="btn btn-accent text-xs px-2.5 py-1.5">
+                      <iconify-icon icon="fluent:send-24-regular"></iconify-icon> Post now
+                    </button>
+                    <button @click="delPost(p.id)" class="btn btn-ghost text-xs px-2 py-1.5" title="Delete">
+                      <iconify-icon icon="fluent:delete-24-regular"></iconify-icon>
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </template>
+            <template x-if="!loading && upcoming.length===0">
+              <div class="card p-8 text-center text-muted text-sm">
+                <iconify-icon icon="fluent:calendar-add-24-regular" class="text-3xl mb-2 opacity-60"></iconify-icon>
+                <p>No upcoming posts. <button class="text-accenthi font-medium" @click="view='compose'">Compose one →</button></p>
+              </div>
+            </template>
+          </div>
+
+          <div class="flex items-center gap-2 mb-3">
+            <iconify-icon icon="fluent:history-24-regular" class="text-muted text-lg"></iconify-icon>
+            <h2 class="text-lg font-semibold font-display">Recent</h2>
+          </div>
+          <div class="space-y-3">
+            <template x-for="p in recent" :key="p.id">
+              <div class="card card-hover p-4 fadeup">
+                <div class="flex justify-between items-start gap-3">
+                  <div class="flex-1 min-w-0">
+                    <p class="text-sm text-slate-200 truncate" x-text="p.content"></p>
+                    <p class="text-xs text-muted mt-1" x-text="fmt(p.posted_at || p.scheduled_for)"></p>
+                  </div>
+                  <div class="flex gap-1.5 shrink-0 flex-wrap justify-end">
+                    <template x-for="r in p.results" :key="r.platform">
+                      <span class="inline-flex items-center gap-1 text-xs px-2 py-1 rounded-full border"
+                        :class="r.status==='success' ? 'bg-emerald-950/60 border-emerald-700/50 text-emerald-300' : (r.status==='failed' ? 'bg-red-950/60 border-red-700/50 text-red-300' : 'bg-white/5 border-white/10 text-slate-300')">
+                        <iconify-icon :icon="pIcon(r.platform)"></iconify-icon>
+                        <span x-text="r.status"></span>
+                      </span>
+                    </template>
+                  </div>
+                </div>
+              </div>
+            </template>
+            <template x-if="!loading && recent.length===0">
+              <p class="text-muted text-sm">Nothing posted yet.</p>
+            </template>
+          </div>
+        </section>
+
+        <!-- ===================== COMPOSER ===================== -->
+        <section x-show="view==='compose'" x-transition.opacity.duration.300ms x-cloak>
+          <h1 class="text-2xl font-bold font-display mb-6 fadeup">Compose</h1>
+
+          <template x-if="accounts.filter(a=>a.connected).length===0">
+            <div class="flex items-start gap-3 bg-amber-950/40 border border-amber-700/50 text-amber-200 rounded-2xl p-4 mb-4 text-sm fadeup">
+              <iconify-icon icon="fluent:warning-24-filled" class="text-lg shrink-0 mt-0.5"></iconify-icon>
+              <span>No accounts connected yet. Head to <button class="underline font-medium" @click="view='accounts'">Accounts</button> to connect one.</span>
+            </div>
+          </template>
+
+          <div class="fadeup">
+            <textarea x-model="composer.content" rows="6"
+              class="inp w-full p-4 text-slate-100 placeholder-slate-500 resize-none"
+              placeholder="What do you want to share?"></textarea>
+          </div>
+
+          <!-- AI caption assist -->
+          <template x-if="ai.enabled">
+            <div class="mt-2 flex items-center gap-2 flex-wrap">
+              <button @click="generateCaption()" :disabled="ai.busy" class="btn btn-soft text-xs px-3 py-1.5">
+                <template x-if="!ai.busy"><span class="inline-flex items-center gap-1.5"><iconify-icon icon="fluent:sparkle-24-filled"></iconify-icon> Write with AI</span></template>
+                <template x-if="ai.busy"><span class="inline-flex items-center gap-1.5"><span class="spin inline-block w-3 h-3 border-2 border-accenthi border-t-transparent rounded-full"></span> Writing…</span></template>
+              </button>
+              <span class="text-[11px] text-muted">Turns your draft into a polished caption</span>
+            </div>
+          </template>
+
+          <!-- per-platform char counts -->
+          <div class="flex flex-wrap gap-2 mt-3 mb-5">
+            <template x-for="pl in composer.platforms" :key="pl">
+              <span class="inline-flex items-center gap-1 text-xs px-2 py-1 rounded-full border"
+                :class="composer.content.length>limits[pl] ? 'bg-red-950/60 border-red-700/50 text-red-300' : 'bg-white/5 border-white/10 text-slate-300'">
+                <iconify-icon :icon="pIcon(pl)" :style="'color:'+brand(pl)"></iconify-icon>
+                <span x-text="composer.content.length+'/'+limits[pl]"></span>
+              </span>
+            </template>
+          </div>
+
+          <p class="text-sm text-muted mb-2 font-medium">Platforms</p>
+          <div class="flex flex-wrap gap-2 mb-6">
+            <template x-for="a in accounts.filter(a=>a.connected)" :key="a.platform">
+              <button @click="togglePlatform(a.platform)"
+                class="btn px-3 py-2 text-sm border"
+                :class="composer.platforms.includes(a.platform) ? 'border-accent bg-accent/15 text-white' : 'border-white/10 text-slate-300 hover:border-white/25'">
+                <iconify-icon :icon="pIcon(a.platform)" :style="'color:'+brand(a.platform)" class="text-base"></iconify-icon>
+                <span x-text="pName(a.platform)"></span>
+              </button>
+            </template>
+          </div>
+
+          <!-- media -->
+          <p class="text-sm text-muted mb-2 font-medium">Media (optional)</p>
+          <div @click="$refs.file.click()" @dragover.prevent @drop.prevent="handleDrop($event)"
+            class="border-2 border-dashed border-white/10 rounded-2xl p-6 text-center cursor-pointer hover:border-accent/60 hover:bg-white/[.02] transition mb-3">
+            <input type="file" x-ref="file" class="hidden" multiple accept="image/*,video/*" @change="handleFiles($event)" />
+            <iconify-icon icon="fluent:arrow-upload-24-regular" class="text-2xl text-muted"></iconify-icon>
+            <p class="text-muted text-sm mt-1">Click or drop images / video here</p>
+          </div>
+          <div class="flex flex-wrap gap-2.5 mb-5">
+            <template x-for="(m,i) in composer.media" :key="m.filename">
+              <div class="relative">
+                <div class="cursor-pointer" @click="openPreview(m)" title="Click to preview">
+                  <template x-if="isVideo(m)">
+                    <div class="relative w-20 h-20">
+                      <video :src="m.url" class="w-20 h-20 object-cover rounded-xl bg-black" muted playsinline preload="metadata"></video>
+                      <span class="absolute inset-0 flex items-center justify-center text-white text-2xl pointer-events-none drop-shadow"><iconify-icon icon="fluent:play-circle-24-filled"></iconify-icon></span>
+                    </div>
+                  </template>
+                  <template x-if="!isVideo(m)">
+                    <img :src="m.url" class="w-20 h-20 object-cover rounded-xl" />
+                  </template>
+                </div>
+                <button @click="removeMedia(i)" class="absolute -top-2 -right-2 bg-red-600 hover:bg-red-500 rounded-full w-5 h-5 text-xs z-10 flex items-center justify-center text-white">
+                  <iconify-icon icon="fluent:dismiss-24-regular" class="text-[11px]"></iconify-icon>
+                </button>
+              </div>
+            </template>
+          </div>
+
+          <!-- AI / video media tools -->
+          <template x-if="caps.image_gen || caps.slideshow || caps.ai_video">
+            <div class="card p-4 mb-6 space-y-3">
+              <p class="text-xs font-semibold text-slate-300 flex items-center gap-1.5"><iconify-icon icon="fluent:wand-24-regular" class="text-accenthi"></iconify-icon> Create media</p>
+
+              <template x-if="caps.image_gen">
+                <div class="flex gap-2">
+                  <input x-model="tools.imgPrompt" placeholder="Describe an image to generate…" class="inp flex-1 p-2 text-sm" @keydown.enter="genImage()" />
+                  <button @click="genImage()" :disabled="tools.imgBusy" class="btn btn-accent text-xs px-3 whitespace-nowrap">
+                    <template x-if="!tools.imgBusy"><span class="inline-flex items-center gap-1"><iconify-icon icon="fluent:image-24-regular"></iconify-icon> Generate</span></template>
+                    <template x-if="tools.imgBusy"><span class="spin inline-block w-3 h-3 border-2 border-white border-t-transparent rounded-full"></span></template>
+                  </button>
+                </div>
+              </template>
+
+              <template x-if="caps.slideshow">
+                <div class="flex items-center gap-2">
+                  <button @click="makeSlideshow()" :disabled="tools.slideBusy || imageCount()===0" class="btn btn-soft text-xs px-3 py-1.5 whitespace-nowrap">
+                    <template x-if="!tools.slideBusy"><span class="inline-flex items-center gap-1"><iconify-icon icon="fluent:movies-and-tv-24-regular"></iconify-icon> Slideshow video</span></template>
+                    <template x-if="tools.slideBusy"><span>Rendering…</span></template>
+                  </button>
+                  <span class="text-[11px] text-muted" x-text="imageCount()+' image(s) → vertical MP4'"></span>
+                </div>
+              </template>
+
+              <template x-if="caps.ai_video">
+                <div class="flex gap-2">
+                  <input x-model="tools.vidPrompt" placeholder="Describe a video to generate (AI)…" class="inp flex-1 p-2 text-sm" @keydown.enter="genAiVideo()" />
+                  <button @click="genAiVideo()" :disabled="tools.vidBusy" class="btn btn-accent text-xs px-3 whitespace-nowrap">
+                    <template x-if="!tools.vidBusy"><span class="inline-flex items-center gap-1"><iconify-icon icon="fluent:video-clip-24-regular"></iconify-icon> AI video</span></template>
+                    <template x-if="tools.vidBusy"><span>Generating…</span></template>
+                  </button>
+                </div>
+              </template>
+              <template x-if="caps.ai_video && tools.vidBusy">
+                <p class="text-[11px] text-amber-300">AI video can take a few minutes — you can keep editing.</p>
+              </template>
+            </div>
+          </template>
+
+          <p class="text-sm text-muted mb-2 font-medium">Schedule</p>
+          <input type="datetime-local" x-model="composer.when" class="inp p-3 text-slate-100 mb-6 w-full md:w-auto" />
+
+          <div class="flex gap-3">
+            <button @click="schedule()" :disabled="composer.busy" class="btn btn-accent px-5 py-3">
+              <iconify-icon icon="fluent:calendar-checkmark-24-regular"></iconify-icon> Schedule post
+            </button>
+            <button @click="schedule(true)" :disabled="composer.busy" class="btn btn-ghost px-5 py-3">
+              <iconify-icon icon="fluent:send-24-regular"></iconify-icon> Post now
+            </button>
+          </div>
+        </section>
+
+        <!-- ===================== ACCOUNTS ===================== -->
+        <section x-show="view==='accounts'" x-transition.opacity.duration.300ms x-cloak>
+          <h1 class="text-2xl font-bold font-display mb-6 fadeup">Accounts</h1>
+          <div class="grid md:grid-cols-2 gap-4 stagger">
+            <template x-for="a in accounts" :key="a.platform">
+              <div class="card card-hover p-4">
+                <div class="flex items-center justify-between mb-3">
+                  <div class="flex items-center gap-3">
+                    <div class="w-10 h-10 rounded-xl flex items-center justify-center" :style="'background:'+brand(a.platform)+'22'">
+                      <iconify-icon :icon="pIcon(a.platform)" :style="'color:'+brand(a.platform)" class="text-2xl"></iconify-icon>
+                    </div>
+                    <div>
+                      <p class="font-semibold" x-text="pName(a.platform)"></p>
+                      <p class="text-xs flex items-center gap-1" :class="a.connected ? (a.status==='expired'?'text-amber-400':'text-emerald-400') : 'text-muted'">
+                        <span class="w-1.5 h-1.5 rounded-full" :class="a.connected ? (a.status==='expired'?'bg-amber-400':'bg-emerald-400') : 'bg-slate-500'"></span>
+                        <span x-text="a.connected ? (a.status==='expired'?'Session expired':'Connected') : 'Not connected'"></span>
+                      </p>
+                    </div>
+                  </div>
+                  <template x-if="a.connected">
+                    <button @click="disconnect(a.platform)" class="btn btn-ghost text-xs px-2.5 py-1.5 hover:!bg-red-900/50">Disconnect</button>
+                  </template>
+                </div>
+
+                <template x-if="a.connected">
+                  <p class="text-xs text-muted" x-text="'@'+a.username+(a.last_used?' · last used '+fmt(a.last_used):'')"></p>
+                </template>
+
+                <!-- Bluesky inline form -->
+                <template x-if="!a.connected && a.platform==='bluesky'">
+                  <div class="space-y-2 mt-2">
+                    <input x-model="forms.bluesky.handle" placeholder="handle.bsky.social" class="inp w-full p-2 text-sm" />
+                    <input x-model="forms.bluesky.app_password" type="password" placeholder="app password" class="inp w-full p-2 text-sm" />
+                    <button @click="connectBluesky()" class="btn btn-accent w-full py-2 text-sm">Connect</button>
+                    <p class="text-[11px] text-muted">App password from Bluesky → Settings → App Passwords.</p>
+                  </div>
+                </template>
+
+                <!-- Mastodon inline form -->
+                <template x-if="!a.connected && a.platform==='mastodon'">
+                  <div class="space-y-2 mt-2">
+                    <input x-model="forms.mastodon.instance_url" placeholder="mastodon.social" class="inp w-full p-2 text-sm" />
+                    <input x-model="forms.mastodon.access_token" type="password" placeholder="access token" class="inp w-full p-2 text-sm" />
+                    <button @click="connectMastodon()" class="btn btn-accent w-full py-2 text-sm">Connect</button>
+                    <p class="text-[11px] text-muted">Token from your instance → Preferences → Development.</p>
+                  </div>
+                </template>
+
+                <!-- Session-based platforms -->
+                <template x-if="!a.connected && ['instagram','twitter','linkedin','tiktok'].includes(a.platform)">
+                  <div class="mt-2">
+                    <template x-if="connecting[a.platform]!=='capturing'">
+                      <button @click="connectBrowser(a.platform)" class="btn btn-accent w-full py-2 text-sm">
+                        <iconify-icon icon="fluent:globe-24-regular"></iconify-icon> Connect via browser
+                      </button>
+                    </template>
+                    <template x-if="connecting[a.platform]==='capturing'">
+                      <div class="text-xs text-amber-300 flex items-center gap-2">
+                        <span class="spin inline-block w-3 h-3 border-2 border-amber-300 border-t-transparent rounded-full"></span>
+                        A browser window opened — log in there, then come back.
+                      </div>
+                    </template>
+                  </div>
+                </template>
+              </div>
+            </template>
+          </div>
+        </section>
+
+        <!-- ===================== HISTORY ===================== -->
+        <section x-show="view==='history'" x-transition.opacity.duration.300ms x-cloak>
+          <h1 class="text-2xl font-bold font-display mb-6 fadeup">History</h1>
+          <div class="flex flex-wrap gap-2 mb-4">
+            <select x-model="filter.platform" class="inp p-2 text-sm">
+              <option value="">All platforms</option>
+              <template x-for="pl in supported" :key="pl"><option :value="pl" x-text="pName(pl)"></option></template>
+            </select>
+            <select x-model="filter.status" class="inp p-2 text-sm">
+              <option value="">All statuses</option>
+              <option value="scheduled">Scheduled</option>
+              <option value="done">Done</option>
+              <option value="failed">Failed</option>
+              <option value="draft">Draft</option>
+            </select>
+          </div>
+          <div class="space-y-2">
+            <template x-for="p in filteredPosts()" :key="p.id">
+              <div class="card card-hover p-4 flex justify-between items-start gap-3">
+                <div class="flex-1 min-w-0">
+                  <p class="text-sm text-slate-200 truncate" x-text="p.content"></p>
+                  <p class="text-xs text-muted mt-1">
+                    <span x-text="fmt(p.scheduled_for)"></span> ·
+                    <span class="capitalize" x-text="p.status"></span>
+                  </p>
+                </div>
+                <div class="flex gap-2 shrink-0 flex-wrap justify-end items-center">
+                  <template x-for="pl in p.platforms" :key="pl">
+                    <span class="inline-flex items-center gap-1" :title="dotStatus(p,pl)">
+                      <iconify-icon :icon="pIcon(pl)" :style="'color:'+brand(pl)"></iconify-icon>
+                      <span class="inline-block w-2 h-2 rounded-full"
+                        :class="dotStatus(p,pl)==='success'?'bg-emerald-400':(dotStatus(p,pl)==='failed'?'bg-red-400':'bg-slate-500')"></span>
+                    </span>
+                  </template>
+                  <button @click="delPost(p.id)" class="btn btn-ghost text-xs px-2 py-1 ml-1" title="Delete">
+                    <iconify-icon icon="fluent:delete-24-regular"></iconify-icon>
+                  </button>
+                </div>
+              </div>
+            </template>
+            <template x-if="filteredPosts().length===0">
+              <p class="text-muted text-sm">No posts match.</p>
+            </template>
+          </div>
+        </section>
+
+        <!-- ===================== GUIDE / HOW IT WORKS ===================== -->
+        <section x-show="view==='guide'" x-transition.opacity.duration.300ms x-cloak>
+          <div class="fadeup mb-8">
+            <h1 class="text-2xl font-bold font-display mb-2">How PostPilot works</h1>
+            <p class="text-muted text-sm max-w-2xl">Write once, send everywhere. Connect your accounts, compose (with AI help if you like), then schedule or post instantly — PostPilot handles each platform for you.</p>
+          </div>
+
+          <!-- Step flow -->
+          <div class="grid md:grid-cols-4 gap-3 mb-10 stagger">
+            <template x-for="s in guideSteps" :key="s.t">
+              <div class="card card-hover p-4">
+                <div class="w-10 h-10 rounded-xl bg-accent/15 border border-accent/30 flex items-center justify-center mb-3">
+                  <iconify-icon :icon="s.i" class="text-accenthi text-xl"></iconify-icon>
+                </div>
+                <p class="font-semibold text-sm font-display mb-1" x-text="s.t"></p>
+                <p class="text-xs text-muted leading-relaxed" x-text="s.d"></p>
+              </div>
+            </template>
+          </div>
+
+          <!-- Connecting accounts -->
+          <h2 class="text-lg font-semibold font-display mb-3 flex items-center gap-2"><iconify-icon icon="fluent:link-24-regular" class="text-accenthi"></iconify-icon> Connecting accounts</h2>
+          <div class="card p-5 mb-8 space-y-4 text-sm">
+            <div class="flex items-start gap-3">
+              <iconify-icon icon="simple-icons:bluesky" style="color:#0085ff" class="text-xl mt-0.5 shrink-0"></iconify-icon>
+              <div><span class="font-medium">Bluesky &amp; Mastodon</span> <span class="text-muted">— paste an app password (Bluesky) or access token (Mastodon) in the Accounts tab. Official APIs, the most reliable.</span></div>
+            </div>
+            <div class="flex items-start gap-3">
+              <iconify-icon icon="simple-icons:linkedin" style="color:#0a66c2" class="text-xl mt-0.5 shrink-0"></iconify-icon>
+              <div><span class="font-medium">LinkedIn, Instagram, Twitter/X</span> <span class="text-muted">— click “Connect via browser”, log in once in the window that opens; PostPilot reuses that session to post for you.</span></div>
+            </div>
+            <div class="flex items-start gap-3">
+              <iconify-icon icon="simple-icons:tiktok" style="color:#ffffff" class="text-xl mt-0.5 shrink-0"></iconify-icon>
+              <div><span class="font-medium">TikTok</span> <span class="text-muted">— TikTok blocks automated uploads; treat it as semi-manual: PostPilot prepares the video + caption and you do the final upload by hand.</span></div>
+            </div>
+          </div>
+
+          <!-- Features -->
+          <h2 class="text-lg font-semibold font-display mb-3 flex items-center gap-2"><iconify-icon icon="fluent:wand-24-regular" class="text-accenthi"></iconify-icon> Create &amp; schedule</h2>
+          <div class="grid md:grid-cols-2 gap-3 mb-8">
+            <template x-for="f in guideFeatures" :key="f.t">
+              <div class="card p-4 flex items-start gap-3">
+                <iconify-icon :icon="f.i" class="text-accenthi text-xl mt-0.5 shrink-0"></iconify-icon>
+                <div>
+                  <p class="font-medium text-sm" x-text="f.t"></p>
+                  <p class="text-xs text-muted leading-relaxed mt-0.5" x-text="f.d"></p>
+                </div>
+              </div>
+            </template>
+          </div>
+
+          <div class="flex items-start gap-3 bg-accent/10 border border-accent/25 rounded-2xl p-4 text-sm">
+            <iconify-icon icon="fluent:lightbulb-24-filled" class="text-accenthi text-lg shrink-0 mt-0.5"></iconify-icon>
+            <span class="text-slate-300">Tip: scheduled posts survive restarts, and each platform posts independently — if one fails, the others still go out. Click any media thumbnail to preview it before posting.</span>
+          </div>
+        </section>
+
+      </div>
+    </main>
+  </div>
+
+  <!-- Mobile bottom nav -->
+  <nav class="md:hidden fixed bottom-0 inset-x-0 bg-surface/90 backdrop-blur border-t border-white/5 flex justify-around py-2 z-30">
+    <template x-for="item in nav" :key="item.id">
+      <button @click="view=item.id" class="navlink flex flex-col items-center gap-0.5 px-3 py-1 rounded-lg"
+        :class="view===item.id ? 'text-accenthi' : 'text-muted'">
+        <iconify-icon :icon="item.icon" class="text-xl"></iconify-icon>
+        <span class="text-[10px]" x-text="item.label"></span>
+      </button>
+    </template>
+  </nav>
+
+  <script>
+    function postpilot() {
+      return {
+        view: "dashboard",
+        loading: true,
+        nav: [
+          { id: "dashboard", label: "Home", icon: "fluent:home-24-regular" },
+          { id: "compose", label: "Compose", icon: "fluent:compose-24-regular" },
+          { id: "accounts", label: "Accounts", icon: "fluent:plug-connected-24-regular" },
+          { id: "history", label: "History", icon: "fluent:history-24-regular" },
+          { id: "guide", label: "Guide", icon: "fluent:book-question-mark-24-regular" },
+        ],
+        supported: ["bluesky","mastodon","instagram","twitter","linkedin","tiktok"],
+        limits: { twitter:280, instagram:2200, bluesky:300, mastodon:500, linkedin:3000, tiktok:2200 },
+        guideSteps: [
+          { i:"fluent:plug-connected-24-regular", t:"1. Connect", d:"Link your social accounts once in the Accounts tab." },
+          { i:"fluent:compose-24-regular", t:"2. Compose", d:"Write your post and pick which platforms to send it to." },
+          { i:"fluent:wand-24-regular", t:"3. Enhance", d:"Optionally generate captions, images or a slideshow video with AI." },
+          { i:"fluent:send-24-regular", t:"4. Publish", d:"Schedule for later or post now — PostPilot does the rest." },
+        ],
+        guideFeatures: [
+          { i:"fluent:sparkle-24-filled", t:"AI captions", d:"Turn a rough idea into a polished caption, adapted to each platform's length." },
+          { i:"fluent:image-24-regular", t:"AI images", d:"Generate an image from a text prompt and attach it to your post." },
+          { i:"fluent:movies-and-tv-24-regular", t:"Slideshow video", d:"Combine your images into a vertical MP4 with smooth transitions." },
+          { i:"fluent:eye-24-regular", t:"Preview", d:"Click any thumbnail to view the image or play the video before posting." },
+          { i:"fluent:calendar-clock-24-regular", t:"Scheduling", d:"Queue posts for any time; they fire automatically and survive restarts." },
+          { i:"fluent:checkmark-circle-24-regular", t:"Per-platform results", d:"See exactly what succeeded or failed on each platform in History." },
+        ],
+        posts: [],
+        accounts: [],
+        toasts: [],
+        connecting: {},
+        forms: {
+          bluesky: { handle:"", app_password:"" },
+          mastodon: { instance_url:"", access_token:"" },
+        },
+        composer: { content:"", platforms:[], media:[], when:"", busy:false },
+        ai: { enabled:false, busy:false },
+        caps: { caption:false, image_gen:false, slideshow:false, ai_video:false },
+        tools: { imgPrompt:"", imgBusy:false, slideBusy:false, vidPrompt:"", vidBusy:false },
+        preview: { open:false, item:null },
+        filter: { platform:"", status:"" },
+
+        async init() {
+          this.composer.when = this.defaultWhen();
+          await Promise.all([this.loadPosts(), this.loadAccounts(), this.loadCaps()]);
+          this.loading = false;
+          setInterval(() => { this.loadPosts(); this.loadAccounts(); }, 15000);
+        },
+
+        async loadCaps() {
+          try {
+            const r = await fetch("/api/media/capabilities");
+            this.caps = await r.json();
+            this.ai.enabled = this.caps.caption;
+          } catch(e) {}
+        },
+
+        // ---- media helpers ----
+        isVideo(m) { return /\.(mp4|mov|webm|m4v)$/i.test(m.filename || m.path || ""); },
+        imageCount() { return this.composer.media.filter(m => !this.isVideo(m)).length; },
+        openPreview(m) { this.preview.item = m; this.preview.open = true; },
+        closePreview() { this.preview.open = false; this.preview.item = null; },
+        // Turn a stored media path ("data/media/x.mp4") into a previewable item.
+        mediaItem(path) {
+          const fn = (path || "").split("/").pop();
+          return { url: "/api/media/file/" + fn, filename: fn, path };
+        },
+
+        async genImage() {
+          const prompt = this.tools.imgPrompt.trim();
+          if (!prompt) return this.toast("Describe an image first","error");
+          this.tools.imgBusy = true;
+          try {
+            const r = await fetch("/api/media/generate-image", {
+              method:"POST", headers:{"Content-Type":"application/json"},
+              body: JSON.stringify({ prompt }),
+            });
+            if (!r.ok) throw new Error((await r.json()).detail || "failed");
+            const data = await r.json();
+            data.images.forEach(img => this.composer.media.push(img));
+            this.toast("Image generated");
+            this.tools.imgPrompt = "";
+          } catch(e) { this.toast(e.message,"error"); }
+          this.tools.imgBusy = false;
+        },
+
+        async makeSlideshow() {
+          const images = this.composer.media.filter(m => !this.isVideo(m)).map(m => m.path);
+          if (!images.length) return this.toast("Add or generate images first","error");
+          this.tools.slideBusy = true;
+          try {
+            const r = await fetch("/api/media/slideshow", {
+              method:"POST", headers:{"Content-Type":"application/json"},
+              body: JSON.stringify({ media_paths: images }),
+            });
+            if (!r.ok) throw new Error((await r.json()).detail || "failed");
+            const data = await r.json();
+            this.composer.media.push(data);
+            if (!this.composer.platforms.includes("tiktok") && this.accounts.find(a=>a.platform==="tiktok"&&a.connected))
+              this.toast("Slideshow ready — select TikTok to post it");
+            else this.toast("Slideshow ready");
+          } catch(e) { this.toast(e.message,"error"); }
+          this.tools.slideBusy = false;
+        },
+
+        async genAiVideo() {
+          const prompt = this.tools.vidPrompt.trim();
+          if (!prompt) return this.toast("Describe a video first","error");
+          this.tools.vidBusy = true;
+          try {
+            const r = await fetch("/api/media/ai-video", {
+              method:"POST", headers:{"Content-Type":"application/json"},
+              body: JSON.stringify({ prompt }),
+            });
+            if (!r.ok) throw new Error((await r.json()).detail || "failed");
+            const { job_id } = await r.json();
+            this.toast("AI video started — this can take a few minutes");
+            const poll = setInterval(async () => {
+              try {
+                const s = await fetch("/api/media/ai-video/"+job_id);
+                const job = await s.json();
+                if (job.status === "done") {
+                  clearInterval(poll);
+                  this.composer.media.push(job.result);
+                  this.tools.vidBusy = false;
+                  this.tools.vidPrompt = "";
+                  this.toast("AI video ready");
+                } else if (job.status === "failed") {
+                  clearInterval(poll);
+                  this.tools.vidBusy = false;
+                  this.toast("AI video failed: "+(job.error||""),"error");
+                }
+              } catch(e) {}
+            }, 5000);
+          } catch(e) { this.toast(e.message,"error"); this.tools.vidBusy = false; }
+        },
+        async generateCaption() {
+          const idea = this.composer.content.trim();
+          if (!idea) return this.toast("Write a rough idea first, then let AI polish it","error");
+          this.ai.busy = true;
+          try {
+            const r = await fetch("/api/ai/caption", {
+              method:"POST", headers:{"Content-Type":"application/json"},
+              body: JSON.stringify({ idea, platforms: this.composer.platforms }),
+            });
+            if (!r.ok) throw new Error((await r.json()).detail || "failed");
+            this.composer.content = (await r.json()).caption;
+            this.toast("Caption ready");
+          } catch(e) { this.toast(e.message,"error"); }
+          this.ai.busy = false;
+        },
+
+        // ---- helpers ----
+        pIcon(p) {
+          return {
+            bluesky:"simple-icons:bluesky", mastodon:"simple-icons:mastodon",
+            instagram:"simple-icons:instagram", twitter:"simple-icons:x",
+            linkedin:"simple-icons:linkedin", tiktok:"simple-icons:tiktok",
+          }[p] || "fluent:question-circle-24-regular";
+        },
+        brand(p) {
+          return {
+            bluesky:"#0085ff", mastodon:"#6364ff", instagram:"#e4405f",
+            twitter:"#e7e9ea", linkedin:"#0a66c2", tiktok:"#69C9D0",
+          }[p] || "#94a0b8";
+        },
+        pName(p) {
+          return {
+            bluesky:"Bluesky", mastodon:"Mastodon", instagram:"Instagram",
+            twitter:"Twitter / X", linkedin:"LinkedIn", tiktok:"TikTok",
+          }[p] || p;
+        },
+        fmt(iso) {
+          if (!iso) return "";
+          const d = new Date(iso.endsWith("Z")||iso.includes("+") ? iso : iso+"Z");
+          return d.toLocaleString([], { month:"short", day:"numeric", hour:"2-digit", minute:"2-digit" });
+        },
+        defaultWhen() {
+          const d = new Date(Date.now() + 3600*1000);
+          d.setMinutes(d.getMinutes() - d.getTimezoneOffset());
+          return d.toISOString().slice(0,16);
+        },
+        toast(msg, type="success") {
+          const id = Date.now()+Math.random();
+          this.toasts.push({ id, msg, type });
+          setTimeout(() => { this.toasts = this.toasts.filter(t=>t.id!==id); }, 3500);
+        },
+
+        // ---- data loading ----
+        async loadPosts() {
+          try {
+            const r = await fetch("/api/posts");
+            this.posts = await r.json();
+          } catch(e) { /* keep old */ }
+        },
+        async loadAccounts() {
+          try {
+            const r = await fetch("/api/accounts");
+            this.accounts = await r.json();
+          } catch(e) {}
+        },
+
+        // ---- computed ----
+        get stats() {
+          const today = new Date().toDateString();
+          return {
+            scheduled: this.posts.filter(p=>p.status==="scheduled").length,
+            postedToday: this.posts.filter(p=>p.status==="done" && p.posted_at && new Date(p.posted_at+"Z").toDateString()===today).length,
+          };
+        },
+        get upcoming() {
+          return this.posts.filter(p=>p.status==="scheduled")
+            .sort((a,b)=>new Date(a.scheduled_for)-new Date(b.scheduled_for)).slice(0,10);
+        },
+        get recent() {
+          return this.posts.filter(p=>["done","failed"].includes(p.status))
+            .sort((a,b)=>new Date(b.posted_at||b.scheduled_for)-new Date(a.posted_at||a.scheduled_for)).slice(0,10);
+        },
+        filteredPosts() {
+          return this.posts.filter(p => {
+            if (this.filter.status && p.status!==this.filter.status) return false;
+            if (this.filter.platform && !p.platforms.includes(this.filter.platform)) return false;
+            return true;
+          });
+        },
+        dotStatus(p, platform) {
+          const r = (p.results||[]).find(x=>x.platform===platform);
+          return r ? r.status : "pending";
+        },
+
+        // ---- composer ----
+        togglePlatform(p) {
+          const i = this.composer.platforms.indexOf(p);
+          if (i>=0) this.composer.platforms.splice(i,1);
+          else this.composer.platforms.push(p);
+        },
+        handleFiles(e) { this.uploadFiles(e.target.files); },
+        handleDrop(e) { this.uploadFiles(e.dataTransfer.files); },
+        async uploadFiles(files) {
+          for (const f of files) {
+            const fd = new FormData();
+            fd.append("file", f);
+            try {
+              const r = await fetch("/api/media/upload", { method:"POST", body:fd });
+              const data = await r.json();
+              this.composer.media.push(data);
+            } catch(e) { this.toast("Upload failed","error"); }
+          }
+        },
+        removeMedia(i) {
+          const m = this.composer.media[i];
+          fetch("/api/media/"+m.filename, { method:"DELETE" });
+          this.composer.media.splice(i,1);
+        },
+        async schedule(now=false) {
+          if (!this.composer.content.trim()) return this.toast("Write something first","error");
+          if (this.composer.platforms.length===0) return this.toast("Pick a platform","error");
+          this.composer.busy = true;
+          let whenIso;
+          if (now) whenIso = new Date(Date.now()+10000).toISOString();
+          else whenIso = new Date(this.composer.when).toISOString();
+          const fd = new FormData();
+          fd.append("content", this.composer.content);
+          fd.append("platforms", JSON.stringify(this.composer.platforms));
+          fd.append("scheduled_for", whenIso);
+          fd.append("media_paths", JSON.stringify(this.composer.media.map(m=>m.path)));
+          try {
+            const r = await fetch("/api/posts", { method:"POST", body:fd });
+            if (!r.ok) throw new Error((await r.json()).detail || "failed");
+            this.toast(now ? "Posting now!" : "Scheduled!");
+            this.composer = { content:"", platforms:[], media:[], when:this.defaultWhen(), busy:false };
+            await this.loadPosts();
+            this.view = "dashboard";
+          } catch(e) { this.toast(e.message,"error"); }
+          this.composer.busy = false;
+        },
+
+        // ---- post actions ----
+        async postNow(id) {
+          await fetch("/api/posts/"+id+"/post-now", { method:"POST" });
+          this.toast("Posting now!");
+          await this.loadPosts();
+        },
+        async delPost(id) {
+          await fetch("/api/posts/"+id, { method:"DELETE" });
+          await this.loadPosts();
+        },
+
+        // ---- accounts ----
+        async connectBluesky() {
+          try {
+            const r = await fetch("/api/accounts/connect/bluesky", {
+              method:"POST", headers:{"Content-Type":"application/json"},
+              body: JSON.stringify(this.forms.bluesky),
+            });
+            if (!r.ok) throw new Error((await r.json()).detail);
+            this.toast("Bluesky connected!");
+            await this.loadAccounts();
+          } catch(e) { this.toast(e.message||"Failed","error"); }
+        },
+        async connectMastodon() {
+          try {
+            const r = await fetch("/api/accounts/connect/mastodon", {
+              method:"POST", headers:{"Content-Type":"application/json"},
+              body: JSON.stringify(this.forms.mastodon),
+            });
+            if (!r.ok) throw new Error((await r.json()).detail);
+            this.toast("Mastodon connected!");
+            await this.loadAccounts();
+          } catch(e) { this.toast(e.message||"Failed","error"); }
+        },
+        async connectBrowser(platform) {
+          this.connecting[platform] = "capturing";
+          await fetch("/api/accounts/connect/"+platform, { method:"POST" });
+          this.toast("Browser opened — log in there");
+          const poll = setInterval(async () => {
+            const r = await fetch("/api/accounts/connect-status/"+platform);
+            const data = await r.json();
+            if (data.status==="done") {
+              clearInterval(poll);
+              this.connecting[platform] = "done";
+              this.toast(platform+" connected!");
+              await this.loadAccounts();
+            } else if (data.status==="failed") {
+              clearInterval(poll);
+              this.connecting[platform] = "failed";
+              this.toast(platform+" connection failed","error");
+            }
+          }, 3000);
+        },
+        async disconnect(platform) {
+          await fetch("/api/accounts/"+platform, { method:"DELETE" });
+          this.toast(platform+" disconnected");
+          await this.loadAccounts();
+        },
+      };
+    }
+  </script>
+</body>
+</html>

@@ -1,0 +1,16 @@
+# Secrets & sessions
+.env
+data/sessions/
+data/media/
+data/postpilot.db
+data/*.db
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+.uv/
+*.egg-info/
+
+# OS
+.DS_Store
