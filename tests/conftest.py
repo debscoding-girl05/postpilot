@@ -23,10 +23,14 @@ for _k in (
 
 import pytest_asyncio  # noqa: E402
 
-from app.database import init_db  # noqa: E402
+from app.database import Base, engine, init_db  # noqa: E402
 
 
 @pytest_asyncio.fixture(autouse=True)
 async def _db():
+    # Fresh schema per test for clean multi-tenant isolation.
     await init_db()
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.drop_all)
+        await conn.run_sync(Base.metadata.create_all)
     yield

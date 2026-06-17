@@ -28,9 +28,12 @@ from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 DATA_DIR = Path(os.getenv("DATA_DIR", "./data"))
 DB_PATH = DATA_DIR / "postpilot.db"
-DATABASE_URL = f"sqlite+aiosqlite:///{DB_PATH}"
 
-# Synchronous URL pointing at the same file -- used by APScheduler's job store.
+# Main DB: SQLite for dev; set DATABASE_URL (e.g. postgresql+asyncpg://...) to switch.
+DATABASE_URL = os.getenv("DATABASE_URL") or f"sqlite+aiosqlite:///{DB_PATH}"
+
+# APScheduler's job store uses a *sync* engine. It only stores scheduled-job metadata
+# (post id + run time), so it stays on SQLite for now even if the main DB is Postgres.
 SYNC_DATABASE_URL = f"sqlite:///{DB_PATH}"
 
 
@@ -43,10 +46,29 @@ class Base(DeclarativeBase):
     pass
 
 
+class User(Base):
+    __tablename__ = "users"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    email: Mapped[str] = mapped_column(String(255), unique=True, nullable=False, index=True)
+    password_hash: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    # Token the user's local agent uses to authenticate (Phase 2). Nullable for now.
+    agent_token: Mapped[str | None] = mapped_column(String(64), index=True)
+
+    def to_dict(self) -> dict:
+        return {
+            "id": self.id,
+            "email": self.email,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+        }
+
+
 class Account(Base):
     __tablename__ = "accounts"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True, nullable=False)
     platform: Mapped[str] = mapped_column(String(32), nullable=False)
     username: Mapped[str] = mapped_column(String(255), nullable=False)
     display_name: Mapped[str | None] = mapped_column(String(255))
@@ -73,6 +95,7 @@ class Post(Base):
     __tablename__ = "posts"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True, nullable=False)
     content: Mapped[str] = mapped_column(Text, nullable=False)
     media_paths: Mapped[str | None] = mapped_column(Text)  # JSON array of paths
     platforms: Mapped[str] = mapped_column(Text, nullable=False)  # JSON array
@@ -102,6 +125,7 @@ class PostResult(Base):
     __tablename__ = "post_results"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True, nullable=False)
     post_id: Mapped[int] = mapped_column(ForeignKey("posts.id"))
     platform: Mapped[str] = mapped_column(String(32), nullable=False)
     status: Mapped[str] = mapped_column(String(16), nullable=False)  # success/failed/skipped
@@ -142,6 +166,7 @@ def get_session() -> AsyncSession:
 
 
 __all__ = [
+    "User",
     "Account",
     "Post",
     "PostResult",

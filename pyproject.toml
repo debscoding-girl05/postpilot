@@ -22,6 +22,9 @@ dependencies = [
     "instagrapi",
     "twikit",
     "linkedin-api",
+    "argon2-cffi",
+    "pyjwt",
+    "asyncpg",
 ]
 
 [dependency-groups]

@@ -4,6 +4,9 @@ data/sessions/
 data/media/
 data/postpilot.db
 data/*.db
+# Dev / test data dirs
+data_saas/
+data_test/
 
 # Python
 __pycache__/

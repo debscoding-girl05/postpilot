@@ -1,12 +1,13 @@
 """Tests for the scheduler's execute_post — the resilience guarantees matter most:
-one platform failing must never block the others, and statuses must be recorded.
+one platform failing must never block the others, statuses are recorded, and posts
+are scoped to their owner. Browser-login platforms are skipped server-side.
 """
 import json
 
 import pytest
 
 from app import scheduler as sched
-from app.database import Post, PostResult, get_session, select, utcnow
+from app.database import Post, PostResult, User, get_session, select, utcnow
 from app.platforms.base import PostPayload
 
 
@@ -29,9 +30,19 @@ class FakeDriver:
         return f"{self.name}-post-123"
 
 
-async def _make_post(platforms, content="hello"):
+async def _make_user(email="exec@test.com"):
+    async with get_session() as session:
+        user = User(email=email, password_hash="x")
+        session.add(user)
+        await session.commit()
+        await session.refresh(user)
+        return user.id
+
+
+async def _make_post(user_id, platforms, content="hello"):
     async with get_session() as session:
         post = Post(
+            user_id=user_id,
             content=content,
             media_paths=json.dumps([]),
             platforms=json.dumps(platforms),
@@ -58,23 +69,33 @@ async def _post_status(post_id):
 
 @pytest.fixture(autouse=True)
 def _no_jitter(monkeypatch):
-    # Skip the 2-8s human-like delay so tests run fast.
     async def fast_post(driver, payload):
         return await driver.post(payload)
 
     monkeypatch.setattr(sched, "post_with_jitter", fast_post)
 
 
+# _load_auth_data is awaited with (user_id, platform); the fakes must be coroutines.
+async def _auth(*_a):
+    return {}
+
+
+async def _none(*_a):
+    return None
+
+
 async def test_single_platform_success(monkeypatch):
     monkeypatch.setattr(sched, "get_driver", lambda p: FakeDriver(p))
-    monkeypatch.setattr(sched, "_load_auth_data", lambda p: _auth())
-    post_id = await _make_post(["bluesky"])
+    monkeypatch.setattr(sched, "_load_auth_data", lambda u, p: _auth())
+    uid = await _make_user()
+    post_id = await _make_post(uid, ["bluesky"])
 
     await sched.execute_post(post_id)
 
     results = await _results(post_id)
     assert results["bluesky"].status == "success"
     assert results["bluesky"].platform_post_id == "bluesky-post-123"
+    assert results["bluesky"].user_id == uid
     assert await _post_status(post_id) == "done"
 
 
@@ -84,8 +105,9 @@ async def test_one_failure_does_not_block_others(monkeypatch):
         "mastodon": FakeDriver("mastodon", raise_on_post=True),
     }
     monkeypatch.setattr(sched, "get_driver", lambda p: drivers[p])
-    monkeypatch.setattr(sched, "_load_auth_data", lambda p: _auth())
-    post_id = await _make_post(["bluesky", "mastodon"])
+    monkeypatch.setattr(sched, "_load_auth_data", lambda u, p: _auth())
+    uid = await _make_user()
+    post_id = await _make_post(uid, ["bluesky", "mastodon"])
 
     await sched.execute_post(post_id)
 
@@ -93,38 +115,45 @@ async def test_one_failure_does_not_block_others(monkeypatch):
     assert results["bluesky"].status == "success"
     assert results["mastodon"].status == "failed"
     assert "boom" in results["mastodon"].error_msg
-    # At least one success -> overall "done".
     assert await _post_status(post_id) == "done"
 
 
 async def test_no_account_is_skipped(monkeypatch):
     monkeypatch.setattr(sched, "get_driver", lambda p: FakeDriver(p))
-    monkeypatch.setattr(sched, "_load_auth_data", lambda p: _none())
-    post_id = await _make_post(["twitter"])
+    monkeypatch.setattr(sched, "_load_auth_data", lambda u, p: _none())
+    uid = await _make_user()
+    post_id = await _make_post(uid, ["mastodon"])
 
     await sched.execute_post(post_id)
 
     results = await _results(post_id)
-    assert results["twitter"].status == "skipped"
-    assert await _post_status(post_id) == "failed"  # nothing succeeded
+    assert results["mastodon"].status == "skipped"
+    assert await _post_status(post_id) == "failed"
 
 
 async def test_auth_failure_marks_skipped(monkeypatch):
     monkeypatch.setattr(sched, "get_driver", lambda p: FakeDriver(p, auth_ok=False))
-    monkeypatch.setattr(sched, "_load_auth_data", lambda p: _auth())
-    post_id = await _make_post(["instagram"])
+    monkeypatch.setattr(sched, "_load_auth_data", lambda u, p: _auth())
+    uid = await _make_user()
+    post_id = await _make_post(uid, ["bluesky"])
 
     await sched.execute_post(post_id)
 
     results = await _results(post_id)
-    assert results["instagram"].status == "skipped"
+    assert results["bluesky"].status == "skipped"
 
 
-# _load_auth_data is awaited inside execute_post, so the monkeypatched replacement
-# must be a coroutine function. These tiny helpers provide that.
-async def _auth():
-    return {}
+async def test_session_platform_skipped_server_side(monkeypatch):
+    # Browser-login platforms (twitter/tiktok/etc.) are not posted server-side —
+    # they're handled by the local agent. execute_post should skip them cleanly.
+    monkeypatch.setattr(sched, "get_driver", lambda p: FakeDriver(p))
+    monkeypatch.setattr(sched, "_load_auth_data", lambda u, p: _auth())
+    uid = await _make_user()
+    post_id = await _make_post(uid, ["tiktok"])
 
+    await sched.execute_post(post_id)
 
-async def _none():
-    return None
+    results = await _results(post_id)
+    assert results["tiktok"].status == "skipped"
+    assert "agent" in (results["tiktok"].error_msg or "").lower()
+    assert await _post_status(post_id) == "failed"

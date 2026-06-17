@@ -122,7 +122,36 @@
     </template>
   </div>
 
-  <div class="flex min-h-screen">
+  <!-- ===================== AUTH SCREEN ===================== -->
+  <div x-show="authed===false" x-cloak class="min-h-screen flex items-center justify-center p-4">
+    <div class="w-full max-w-sm fadeup">
+      <div class="flex items-center justify-center gap-2.5 mb-7">
+        <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-accent to-cyan-400 flex items-center justify-center shadow-lg shadow-accent/30">
+          <iconify-icon icon="fluent:rocket-24-filled" class="text-white text-2xl"></iconify-icon>
+        </div>
+        <span class="text-2xl font-bold font-display tracking-tight">PostPilot</span>
+      </div>
+      <div class="card p-6">
+        <p class="font-display font-semibold text-lg mb-1" x-text="authMode==='login' ? 'Welcome back' : 'Create your account'"></p>
+        <p class="text-muted text-xs mb-5" x-text="authMode==='login' ? 'Log in to schedule across platforms.' : 'Free to start. Post everywhere from one place.'"></p>
+        <form @submit.prevent="submitAuth()" class="space-y-3">
+          <input x-model="authForm.email" type="email" placeholder="Email" required class="inp w-full p-3 text-sm" />
+          <input x-model="authForm.password" type="password" placeholder="Password (min 8 chars)" required class="inp w-full p-3 text-sm" />
+          <button type="submit" :disabled="authForm.busy" class="btn btn-accent w-full py-3">
+            <template x-if="!authForm.busy"><span x-text="authMode==='login' ? 'Log in' : 'Sign up'"></span></template>
+            <template x-if="authForm.busy"><span class="spin inline-block w-4 h-4 border-2 border-white border-t-transparent rounded-full"></span></template>
+          </button>
+        </form>
+        <p class="text-center text-xs text-muted mt-4">
+          <span x-text="authMode==='login' ? \"No account?\" : 'Already have an account?'"></span>
+          <button class="text-accenthi font-medium ml-1" @click="authMode = authMode==='login' ? 'signup' : 'login'"
+            x-text="authMode==='login' ? 'Sign up' : 'Log in'"></button>
+        </p>
+      </div>
+    </div>
+  </div>
+
+  <div class="flex min-h-screen" x-show="authed===true" x-cloak>
 
     <!-- Desktop sidebar -->
     <aside class="hidden md:flex flex-col w-64 bg-surface/70 backdrop-blur border-r border-white/5 p-4 fixed h-full">
@@ -142,9 +171,17 @@
           </button>
         </template>
       </nav>
-      <div class="flex items-center gap-2 text-xs text-muted px-3 py-2 rounded-lg bg-white/5">
-        <span class="w-2 h-2 rounded-full bg-emerald-400"></span>
-        <span><span x-text="accounts.filter(a=>a.connected).length"></span> connected</span>
+      <div class="space-y-2">
+        <div class="flex items-center gap-2 text-xs text-muted px-3 py-2 rounded-lg bg-white/5">
+          <span class="w-2 h-2 rounded-full bg-emerald-400"></span>
+          <span><span x-text="accounts.filter(a=>a.connected).length"></span> connected</span>
+        </div>
+        <div class="flex items-center justify-between px-3 py-2 rounded-lg bg-white/5">
+          <span class="text-xs text-muted truncate" :title="authUser?.email" x-text="authUser?.email"></span>
+          <button @click="logout()" class="text-muted hover:text-white" title="Log out">
+            <iconify-icon icon="fluent:sign-out-24-regular" class="text-lg"></iconify-icon>
+          </button>
+        </div>
       </div>
     </aside>
 
@@ -446,20 +483,11 @@
                   </div>
                 </template>
 
-                <!-- Session-based platforms -->
-                <template x-if="!a.connected && ['instagram','twitter','linkedin','tiktok'].includes(a.platform)">
-                  <div class="mt-2">
-                    <template x-if="connecting[a.platform]!=='capturing'">
-                      <button @click="connectBrowser(a.platform)" class="btn btn-accent w-full py-2 text-sm">
-                        <iconify-icon icon="fluent:globe-24-regular"></iconify-icon> Connect via browser
-                      </button>
-                    </template>
-                    <template x-if="connecting[a.platform]==='capturing'">
-                      <div class="text-xs text-amber-300 flex items-center gap-2">
-                        <span class="spin inline-block w-3 h-3 border-2 border-amber-300 border-t-transparent rounded-full"></span>
-                        A browser window opened — log in there, then come back.
-                      </div>
-                    </template>
+                <!-- Browser-login platforms: handled by the local agent (Phase 2) -->
+                <template x-if="!a.connected && a.via_agent">
+                  <div class="mt-2 flex items-center gap-2 text-xs text-muted bg-white/5 rounded-lg px-3 py-2">
+                    <iconify-icon icon="fluent:desktop-24-regular" class="text-base"></iconify-icon>
+                    <span>Posts via the PostPilot desktop agent — <span class="text-accenthi">coming soon</span></span>
                   </div>
                 </template>
               </div>
@@ -575,7 +603,7 @@
   </div>
 
   <!-- Mobile bottom nav -->
-  <nav class="md:hidden fixed bottom-0 inset-x-0 bg-surface/90 backdrop-blur border-t border-white/5 flex justify-around py-2 z-30">
+  <nav x-show="authed===true" x-cloak class="md:hidden fixed bottom-0 inset-x-0 bg-surface/90 backdrop-blur border-t border-white/5 flex justify-around py-2 z-30">
     <template x-for="item in nav" :key="item.id">
       <button @click="view=item.id" class="navlink flex flex-col items-center gap-0.5 px-3 py-1 rounded-lg"
         :class="view===item.id ? 'text-accenthi' : 'text-muted'">
@@ -627,12 +655,50 @@
         tools: { imgPrompt:"", imgBusy:false, slideBusy:false, vidPrompt:"", vidBusy:false },
         preview: { open:false, item:null },
         filter: { platform:"", status:"" },
+        authed: null,            // null=checking, false=show login, true=app
+        authMode: "login",
+        authUser: null,
+        authForm: { email:"", password:"", busy:false },
+        _started: false,
 
         async init() {
           this.composer.when = this.defaultWhen();
+          try {
+            const r = await fetch("/api/auth/me");
+            if (r.ok) { this.authUser = await r.json(); this.authed = true; this.start(); }
+            else { this.authed = false; }
+          } catch(e) { this.authed = false; }
+        },
+
+        async submitAuth() {
+          this.authForm.busy = true;
+          try {
+            const r = await fetch("/api/auth/"+(this.authMode==="login"?"login":"signup"), {
+              method:"POST", headers:{"Content-Type":"application/json"},
+              body: JSON.stringify({ email:this.authForm.email, password:this.authForm.password }),
+            });
+            if (!r.ok) throw new Error((await r.json()).detail || "failed");
+            this.authUser = await r.json();
+            this.authForm = { email:"", password:"", busy:false };
+            this.authed = true;
+            this.start();
+          } catch(e) { this.toast(e.message,"error"); }
+          this.authForm.busy = false;
+        },
+
+        async logout() {
+          await fetch("/api/auth/logout", { method:"POST" });
+          this.authUser = null; this.authed = false; this.authMode = "login";
+          this.posts = []; this.accounts = [];
+        },
+
+        // Load app data once authenticated (runs once).
+        async start() {
+          if (this._started) return;
+          this._started = true;
           await Promise.all([this.loadPosts(), this.loadAccounts(), this.loadCaps()]);
           this.loading = false;
-          setInterval(() => { this.loadPosts(); this.loadAccounts(); }, 15000);
+          setInterval(() => { if (this.authed) { this.loadPosts(); this.loadAccounts(); } }, 15000);
         },
 
         async loadCaps() {
