@@ -570,6 +570,106 @@
           </div>
         </section>
 
+        <!-- ===================== SERIES ===================== -->
+        <section x-show="view==='series'" x-transition.opacity.duration.300ms x-cloak>
+          <h1 class="text-2xl font-bold font-display mb-1 fadeup">Series</h1>
+          <p class="text-muted text-sm mb-5 fadeup">Recurring content concepts — give one line about your day and AI drafts the post.</p>
+
+          <div class="card p-4 mb-6">
+            <p class="font-display font-semibold mb-3 flex items-center gap-2"><iconify-icon icon="fluent:add-circle-24-regular" class="text-accenthi"></iconify-icon> New series</p>
+            <div class="grid md:grid-cols-2 gap-3">
+              <input x-model="seriesForm.title" placeholder="Title (e.g. Daily fitness log)" class="inp p-2 text-sm md:col-span-2" />
+              <textarea x-model="seriesForm.concept" rows="2" placeholder="What's this series about? Theme, audience, voice…" class="inp p-2 text-sm md:col-span-2 resize-none"></textarea>
+              <select x-model="seriesForm.cadence" class="inp p-2 text-sm">
+                <option value="daily">Daily</option>
+                <option value="weekdays">Weekdays</option>
+                <option value="weekly">Weekly</option>
+              </select>
+              <input x-model="seriesForm.post_time" type="time" class="inp p-2 text-sm" />
+              <input x-model="seriesForm.tone" placeholder="Tone (e.g. upbeat, professional)" class="inp p-2 text-sm md:col-span-2" />
+            </div>
+            <p class="text-xs text-muted mt-3 mb-1">Platforms</p>
+            <div class="flex flex-wrap gap-2">
+              <template x-for="a in accounts.filter(a=>a.connected)" :key="a.platform">
+                <button @click="toggleSeriesPlatform(a.platform)" class="btn px-3 py-1.5 text-sm border"
+                  :class="seriesForm.platforms.includes(a.platform) ? 'border-accent bg-accent/15 text-white' : 'border-white/10 text-slate-300 hover:border-white/25'">
+                  <iconify-icon :icon="pIcon(a.platform)" :style="'color:'+brand(a.platform)"></iconify-icon>
+                  <span x-text="pName(a.platform)"></span>
+                </button>
+              </template>
+              <template x-if="accounts.filter(a=>a.connected).length===0"><span class="text-xs text-muted">Connect an account first.</span></template>
+            </div>
+            <button @click="createSeries()" class="btn btn-accent mt-4 px-4 py-2"><iconify-icon icon="fluent:checkmark-24-regular"></iconify-icon> Create series</button>
+          </div>
+
+          <div class="space-y-4">
+            <template x-for="s in series" :key="s.id">
+              <div class="card p-4 fadeup">
+                <div class="flex justify-between items-start gap-3">
+                  <div class="min-w-0">
+                    <p class="font-semibold font-display" x-text="s.title"></p>
+                    <p class="text-xs text-muted mt-0.5 flex items-center gap-2 flex-wrap">
+                      <span class="capitalize" x-text="s.cadence"></span> · <span x-text="s.post_time"></span> ·
+                      <template x-for="pl in s.platforms" :key="pl"><iconify-icon :icon="pIcon(pl)" :style="'color:'+brand(pl)"></iconify-icon></template>
+                    </p>
+                    <p class="text-xs text-slate-400 mt-1" x-text="s.concept"></p>
+                  </div>
+                  <button @click="deleteSeries(s.id)" class="btn btn-ghost text-xs px-2 py-1 shrink-0" title="Delete series"><iconify-icon icon="fluent:delete-24-regular"></iconify-icon></button>
+                </div>
+                <div class="mt-3 border-t border-white/5 pt-3">
+                  <div class="flex gap-2">
+                    <input x-model="gen[s.id]" placeholder="One line about today's entry…" class="inp flex-1 p-2 text-sm" @keydown.enter="genEntry(s)" />
+                    <button @click="genEntry(s)" :disabled="genBusy===s.id" class="btn btn-soft text-xs px-3 whitespace-nowrap">
+                      <template x-if="genBusy!==s.id"><span class="inline-flex items-center gap-1"><iconify-icon icon="fluent:sparkle-24-filled"></iconify-icon> Generate</span></template>
+                      <template x-if="genBusy===s.id"><span class="spin inline-block w-3 h-3 border-2 border-accenthi border-t-transparent rounded-full"></span></template>
+                    </button>
+                  </div>
+                  <template x-if="draft.seriesId===s.id">
+                    <div class="mt-3">
+                      <textarea x-model="draft.content" rows="4" class="inp w-full p-3 text-sm resize-none"></textarea>
+                      <div class="flex items-center gap-2 mt-2 flex-wrap">
+                        <button @click="scheduleEntry(s)" :disabled="draft.busy" class="btn btn-accent text-xs px-3 py-2"><iconify-icon icon="fluent:calendar-checkmark-24-regular"></iconify-icon> Schedule next slot</button>
+                        <button @click="draft.seriesId=null" class="btn btn-ghost text-xs px-3 py-2">Discard</button>
+                        <span class="text-[11px] text-muted" x-show="draft.next_slot" x-text="'→ '+fmt(draft.next_slot)"></span>
+                      </div>
+                    </div>
+                  </template>
+                </div>
+              </div>
+            </template>
+            <template x-if="series.length===0"><p class="text-muted text-sm">No series yet — create one above.</p></template>
+          </div>
+        </section>
+
+        <!-- ===================== CALENDAR ===================== -->
+        <section x-show="view==='calendar'" x-transition.opacity.duration.300ms x-cloak>
+          <div class="flex items-center justify-between mb-5 fadeup">
+            <h1 class="text-2xl font-bold font-display">Calendar</h1>
+            <div class="flex items-center gap-2">
+              <button @click="calOffset--" class="btn btn-ghost px-2 py-1.5"><iconify-icon icon="fluent:chevron-left-24-regular"></iconify-icon></button>
+              <span class="text-sm font-medium w-36 text-center" x-text="calLabel()"></span>
+              <button @click="calOffset++" class="btn btn-ghost px-2 py-1.5"><iconify-icon icon="fluent:chevron-right-24-regular"></iconify-icon></button>
+            </div>
+          </div>
+          <div class="grid grid-cols-7 gap-1 text-center text-[11px] text-muted mb-1">
+            <template x-for="d in ['Mon','Tue','Wed','Thu','Fri','Sat','Sun']" :key="d"><div x-text="d"></div></template>
+          </div>
+          <div class="grid grid-cols-7 gap-1">
+            <template x-for="cell in calCells()" :key="cell.key">
+              <div class="min-h-[88px] rounded-lg border border-white/5 p-1.5" :class="cell.inMonth ? 'bg-white/[.02]' : 'opacity-40'">
+                <div class="text-[11px]" :class="cell.today ? 'text-accenthi font-bold' : 'text-muted'" x-text="cell.day"></div>
+                <div class="space-y-1 mt-1">
+                  <template x-for="p in cell.posts" :key="p.id">
+                    <div @click="view='history'" class="text-[10px] leading-tight truncate rounded px-1 py-0.5 cursor-pointer"
+                      :class="p.status==='done' ? 'bg-emerald-900/50 text-emerald-300' : (p.status==='failed' ? 'bg-red-900/50 text-red-300' : 'bg-accent/20 text-accenthi')"
+                      :title="p.content" x-text="p.content"></div>
+                  </template>
+                </div>
+              </div>
+            </template>
+          </div>
+        </section>
+
       </div>
     </main>
   </div>
@@ -593,6 +693,8 @@
         nav: [
           { id: "dashboard", label: "Home", icon: "fluent:home-24-regular" },
           { id: "compose", label: "Compose", icon: "fluent:compose-24-regular" },
+          { id: "series", label: "Series", icon: "fluent:channel-24-regular" },
+          { id: "calendar", label: "Calendar", icon: "fluent:calendar-ltr-24-regular" },
           { id: "accounts", label: "Accounts", icon: "fluent:plug-connected-24-regular" },
           { id: "history", label: "History", icon: "fluent:history-24-regular" },
           { id: "guide", label: "Guide", icon: "fluent:book-question-mark-24-regular" },
@@ -627,12 +729,93 @@
         tools: { imgPrompt:"", imgBusy:false, slideBusy:false, vidPrompt:"", vidBusy:false },
         preview: { open:false, item:null },
         filter: { platform:"", status:"" },
+        series: [],
+        seriesForm: { title:"", concept:"", platforms:[], cadence:"daily", post_time:"09:00", tone:"" },
+        gen: {},          // seriesId -> today's note input
+        genBusy: null,
+        draft: { seriesId:null, content:"", next_slot:"", busy:false },
+        calOffset: 0,     // months relative to the current month
 
         async init() {
           this.composer.when = this.defaultWhen();
-          await Promise.all([this.loadPosts(), this.loadAccounts(), this.loadCaps()]);
+          await Promise.all([this.loadPosts(), this.loadAccounts(), this.loadCaps(), this.loadSeries()]);
           this.loading = false;
           setInterval(() => { this.loadPosts(); this.loadAccounts(); }, 15000);
+        },
+
+        // ---- series ----
+        async loadSeries() {
+          try { this.series = await (await fetch("/api/series")).json(); } catch(e) {}
+        },
+        toggleSeriesPlatform(p) {
+          const i = this.seriesForm.platforms.indexOf(p);
+          if (i>=0) this.seriesForm.platforms.splice(i,1); else this.seriesForm.platforms.push(p);
+        },
+        async createSeries() {
+          if (!this.seriesForm.title.trim()) return this.toast("Give the series a title","error");
+          try {
+            const r = await fetch("/api/series", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify(this.seriesForm) });
+            if (!r.ok) throw new Error((await r.json()).detail || "failed");
+            this.toast("Series created");
+            this.seriesForm = { title:"", concept:"", platforms:[], cadence:"daily", post_time:"09:00", tone:"" };
+            await this.loadSeries();
+          } catch(e) { this.toast(e.message,"error"); }
+        },
+        async deleteSeries(id) {
+          await fetch("/api/series/"+id, { method:"DELETE" });
+          if (this.draft.seriesId===id) this.draft.seriesId = null;
+          await this.loadSeries();
+        },
+        async genEntry(s) {
+          const note = (this.gen[s.id]||"").trim();
+          if (!note) return this.toast("Add a line about today's entry","error");
+          this.genBusy = s.id;
+          try {
+            const r = await fetch("/api/series/"+s.id+"/generate", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ note }) });
+            if (!r.ok) throw new Error((await r.json()).detail || "failed");
+            const d = await r.json();
+            this.draft = { seriesId:s.id, content:d.caption, next_slot:d.next_slot, busy:false };
+          } catch(e) { this.toast(e.message,"error"); }
+          this.genBusy = null;
+        },
+        async scheduleEntry(s) {
+          if (!this.draft.content.trim()) return this.toast("Nothing to schedule","error");
+          this.draft.busy = true;
+          try {
+            const r = await fetch("/api/series/"+s.id+"/schedule", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ content:this.draft.content }) });
+            if (!r.ok) throw new Error((await r.json()).detail || "failed");
+            this.toast("Scheduled into the series ✨");
+            this.gen[s.id] = ""; this.draft = { seriesId:null, content:"", next_slot:"", busy:false };
+            await this.loadPosts();
+          } catch(e) { this.toast(e.message,"error"); }
+          this.draft.busy = false;
+        },
+
+        // ---- calendar ----
+        calLabel() {
+          const d = new Date(); d.setDate(1); d.setMonth(d.getMonth()+this.calOffset);
+          return d.toLocaleString([], { month:"long", year:"numeric" });
+        },
+        calCells() {
+          const base = new Date(); base.setDate(1); base.setMonth(base.getMonth()+this.calOffset);
+          const month = base.getMonth();
+          // Monday-first grid: find the Monday on/before the 1st.
+          const start = new Date(base);
+          const dow = (start.getDay()+6)%7; // Mon=0..Sun=6
+          start.setDate(start.getDate()-dow);
+          const today = new Date(); today.setHours(0,0,0,0);
+          const cells = [];
+          for (let i=0;i<42;i++) {
+            const d = new Date(start); d.setDate(start.getDate()+i); d.setHours(0,0,0,0);
+            const dayPosts = this.posts.filter(p => {
+              if (!p.scheduled_for) return false;
+              const pd = new Date(p.scheduled_for.endsWith("Z")||p.scheduled_for.includes("+") ? p.scheduled_for : p.scheduled_for+"Z");
+              pd.setHours(0,0,0,0);
+              return pd.getTime()===d.getTime();
+            });
+            cells.push({ key:d.toISOString(), day:d.getDate(), inMonth:d.getMonth()===month, today:d.getTime()===today.getTime(), posts:dayPosts });
+          }
+          return cells;
         },
 
         async loadCaps() {

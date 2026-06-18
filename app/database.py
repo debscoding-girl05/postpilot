@@ -78,6 +78,7 @@ class Post(Base):
     platforms: Mapped[str] = mapped_column(Text, nullable=False)  # JSON array
     scheduled_for: Mapped[datetime] = mapped_column(DateTime, nullable=False)
     status: Mapped[str] = mapped_column(String(16), default="scheduled")
+    series_id: Mapped[int | None] = mapped_column(ForeignKey("series.id"), index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     posted_at: Mapped[datetime | None] = mapped_column(DateTime)
     notes: Mapped[str | None] = mapped_column(Text)
@@ -92,9 +93,43 @@ class Post(Base):
             "platforms": json.loads(self.platforms) if self.platforms else [],
             "scheduled_for": self.scheduled_for.isoformat() if self.scheduled_for else None,
             "status": self.status,
+            "series_id": self.series_id,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "posted_at": self.posted_at.isoformat() if self.posted_at else None,
             "notes": self.notes,
+        }
+
+
+class Series(Base):
+    """A reusable content concept (devlog, vlog, fitness, recipes, …) with a cadence
+    and tone. The generator turns a one-line daily input into a full post."""
+    __tablename__ = "series"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    title: Mapped[str] = mapped_column(String(200), nullable=False)
+    concept: Mapped[str] = mapped_column(Text, default="")  # what this series is about
+    platforms: Mapped[str] = mapped_column(Text, default="[]")  # JSON array
+    cadence: Mapped[str] = mapped_column(String(16), default="daily")  # daily/weekdays/weekly
+    post_time: Mapped[str] = mapped_column(String(5), default="09:00")  # HH:MM local
+    tone: Mapped[str | None] = mapped_column(String(64))
+    hashtags: Mapped[str | None] = mapped_column(Text)  # JSON array
+    active: Mapped[bool] = mapped_column(default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+    def to_dict(self) -> dict:
+        import json
+
+        return {
+            "id": self.id,
+            "title": self.title,
+            "concept": self.concept,
+            "platforms": json.loads(self.platforms) if self.platforms else [],
+            "cadence": self.cadence,
+            "post_time": self.post_time,
+            "tone": self.tone,
+            "hashtags": json.loads(self.hashtags) if self.hashtags else [],
+            "active": self.active,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
         }
 
 
@@ -127,6 +162,14 @@ engine = create_async_engine(DATABASE_URL, echo=False, future=True)
 async_session_maker = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
 
 
+def _sqlite_migrate(sync_conn) -> None:
+    """Lightweight additive migration for existing SQLite DBs (no Alembic).
+    Adds columns introduced after the DB was first created."""
+    cols = {row[1] for row in sync_conn.exec_driver_sql("PRAGMA table_info(posts)")}
+    if cols and "series_id" not in cols:
+        sync_conn.exec_driver_sql("ALTER TABLE posts ADD COLUMN series_id INTEGER")
+
+
 async def init_db() -> None:
     """Create tables if they don't exist. Called on startup."""
     DATA_DIR.mkdir(parents=True, exist_ok=True)
@@ -134,6 +177,8 @@ async def init_db() -> None:
     (DATA_DIR / "media").mkdir(parents=True, exist_ok=True)
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        if DATABASE_URL.startswith("sqlite"):
+            await conn.run_sync(_sqlite_migrate)
 
 
 def get_session() -> AsyncSession:
@@ -145,6 +190,7 @@ __all__ = [
     "Account",
     "Post",
     "PostResult",
+    "Series",
     "Base",
     "engine",
     "async_session_maker",

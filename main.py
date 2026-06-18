@@ -22,6 +22,7 @@ from app.database import (
     DATA_DIR,
     Post,
     PostResult,
+    Series,
     get_session,
     init_db,
     select,
@@ -349,6 +350,123 @@ async def post_now(post_id: int):
         misfire_grace_time=300,
     )
     return {"id": post_id, "status": "scheduled", "fires_at": when.isoformat()}
+
+
+# --- Series (content concepts) -----------------------------------------------
+
+def _next_slot(cadence: str, post_time: str) -> datetime:
+    """Next posting slot (UTC-naive) for a series, from 'HH:MM' local + cadence."""
+    from datetime import time as _time
+    from datetime import timezone as _tz
+
+    try:
+        hh, mm = (int(x) for x in post_time.split(":"))
+    except Exception:
+        hh, mm = 9, 0
+    now_local = datetime.now()
+    cand = now_local.replace(hour=hh, minute=mm, second=0, microsecond=0)
+    if cand <= now_local:
+        cand += timedelta(days=1)
+    if cadence == "weekdays":
+        while cand.weekday() >= 5:  # skip Sat/Sun
+            cand += timedelta(days=1)
+    elif cadence == "weekly":
+        # keep the same weekday as "today" a week out if today's slot has passed
+        if (cand - now_local) < timedelta(days=1):
+            pass  # tomorrow is fine for a first weekly entry
+    # interpret naive as local → convert to UTC-naive (matches stored posts)
+    return cand.astimezone().astimezone(_tz.utc).replace(tzinfo=None)
+
+
+@app.get("/api/series")
+async def list_series():
+    async with get_session() as session:
+        result = await session.execute(select(Series).order_by(Series.created_at.desc()))
+        return [s.to_dict() for s in result.scalars().all()]
+
+
+@app.post("/api/series")
+async def create_series(payload: dict):
+    title = (payload.get("title") or "").strip()
+    if not title:
+        raise HTTPException(400, "Series needs a title")
+    async with get_session() as session:
+        s = Series(
+            title=title,
+            concept=(payload.get("concept") or "").strip(),
+            platforms=json.dumps(payload.get("platforms") or []),
+            cadence=payload.get("cadence") or "daily",
+            post_time=payload.get("post_time") or "09:00",
+            tone=(payload.get("tone") or None),
+            hashtags=json.dumps(payload.get("hashtags") or []),
+        )
+        session.add(s)
+        await session.commit()
+        await session.refresh(s)
+        return s.to_dict()
+
+
+@app.delete("/api/series/{series_id}")
+async def delete_series(series_id: int):
+    async with get_session() as session:
+        s = await session.get(Series, series_id)
+        if not s:
+            raise HTTPException(404, "Series not found")
+        await session.delete(s)
+        await session.commit()
+    return {"deleted": series_id}
+
+
+@app.post("/api/series/{series_id}/generate")
+async def generate_series_entry(series_id: int, payload: dict):
+    note = (payload.get("note") or "").strip()
+    if not note:
+        raise HTTPException(400, "Add a short note about today's entry")
+    if not ai.is_enabled():
+        raise HTTPException(503, "AI is disabled — set GROQ_API_KEY")
+    async with get_session() as session:
+        s = await session.get(Series, series_id)
+        if not s:
+            raise HTTPException(404, "Series not found")
+        data = s.to_dict()
+    try:
+        caption = await ai.generate_series_post(
+            concept=data["concept"], note=note, tone=data["tone"],
+            platforms=data["platforms"], hashtags=data["hashtags"],
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("Series generation failed")
+        raise HTTPException(502, f"Generation failed: {exc}")
+    return {"caption": caption, "platforms": data["platforms"], "next_slot": _next_slot(data["cadence"], data["post_time"]).isoformat() + "Z"}
+
+
+@app.post("/api/series/{series_id}/schedule")
+async def schedule_series_entry(series_id: int, payload: dict):
+    content = (payload.get("content") or "").strip()
+    if not content:
+        raise HTTPException(400, "Nothing to schedule")
+    async with get_session() as session:
+        s = await session.get(Series, series_id)
+        if not s:
+            raise HTTPException(404, "Series not found")
+        data = s.to_dict()
+    platforms = payload.get("platforms") or data["platforms"]
+    if not platforms:
+        raise HTTPException(400, "The series has no platforms selected")
+    when = _to_utc_naive(payload["when"]) if payload.get("when") else _next_slot(data["cadence"], data["post_time"])
+    media = payload.get("media_paths") or []
+    async with get_session() as session:
+        post = Post(
+            content=content, media_paths=json.dumps(media),
+            platforms=json.dumps(platforms), scheduled_for=when,
+            status="scheduled", series_id=series_id,
+        )
+        session.add(post)
+        await session.commit()
+        await session.refresh(post)
+        post_id = post.id
+    schedule_post(post_id, when)
+    return {"id": post_id, "status": "scheduled", "scheduled_for": when.isoformat() + "Z"}
 
 
 # --- Accounts ----------------------------------------------------------------

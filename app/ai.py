@@ -81,36 +81,32 @@ def is_enabled() -> bool:
     return bool(p and p in PROVIDERS and _key_for(p))
 
 
-async def generate_caption(
-    idea: str, platforms: list[str] | None = None, tone: str | None = None
-) -> str:
-    """Generate (or refine) a post caption. Returns the caption text.
+SERIES_SYSTEM = (
+    "You are a social media copywriter running an ongoing content series for a creator. "
+    "Given the series concept, its tone, and the creator's short note about today's "
+    "entry, write a single engaging post. Return only the post text — no preamble, no "
+    "quotes, no markdown, no 'Here is'. Stay on the series concept and match the tone. "
+    "Add a few relevant hashtags only if they fit naturally."
+)
 
-    Raises RuntimeError if no provider/key is configured.
-    """
+
+def _platform_limit(platforms: list[str] | None) -> int:
+    if platforms:
+        return min(CHAR_LIMITS.get(p, 500) for p in platforms)
+    return 500
+
+
+async def _chat(system: str, user_prompt: str) -> str:
+    """Single OpenAI-compatible chat completion via the active provider."""
     name = provider()
     if not name or name not in PROVIDERS:
-        raise RuntimeError("No caption provider configured (set GROQ_API_KEY)")
+        raise RuntimeError("No AI provider configured (set GROQ_API_KEY)")
     cfg = PROVIDERS[name]
     api_key = _key_for(name)
     if not api_key:
-        raise RuntimeError(f"No API key set for caption provider '{name}'")
-
+        raise RuntimeError(f"No API key set for provider '{name}'")
     base = os.getenv(cfg.get("base_env", ""), cfg["base"]).rstrip("/")
     model = os.getenv(cfg["model_env"], cfg["default_model"])
-
-    # Keep within the tightest selected platform's limit so the result fits everywhere.
-    if platforms:
-        limit = min(CHAR_LIMITS.get(p, 500) for p in platforms)
-    else:
-        limit = 500
-
-    parts = [f"Idea / draft:\n{idea}", f"\nKeep the caption at or under {limit} characters."]
-    if platforms:
-        parts.append(f"Target platforms: {', '.join(platforms)}.")
-    if tone:
-        parts.append(f"Tone: {tone}.")
-    user_prompt = "\n".join(parts)
 
     async with httpx.AsyncClient(timeout=30.0) as client:
         resp = await client.post(
@@ -120,15 +116,50 @@ async def generate_caption(
                 "model": model,
                 "max_tokens": 1024,
                 "messages": [
-                    {"role": "system", "content": SYSTEM_PROMPT},
+                    {"role": "system", "content": system},
                     {"role": "user", "content": user_prompt},
                 ],
             },
         )
         resp.raise_for_status()
         data = resp.json()
-
     return (data["choices"][0]["message"]["content"] or "").strip()
 
 
-__all__ = ["generate_caption", "is_enabled", "provider", "PROVIDERS"]
+async def generate_caption(
+    idea: str, platforms: list[str] | None = None, tone: str | None = None
+) -> str:
+    """Generate (or refine) a post caption. Returns the caption text."""
+    limit = _platform_limit(platforms)
+    parts = [f"Idea / draft:\n{idea}", f"\nKeep the caption at or under {limit} characters."]
+    if platforms:
+        parts.append(f"Target platforms: {', '.join(platforms)}.")
+    if tone:
+        parts.append(f"Tone: {tone}.")
+    return await _chat(SYSTEM_PROMPT, "\n".join(parts))
+
+
+async def generate_series_post(
+    concept: str,
+    note: str,
+    tone: str | None = None,
+    platforms: list[str] | None = None,
+    hashtags: list[str] | None = None,
+) -> str:
+    """Generate a full post for a content series from a one-line daily note."""
+    limit = _platform_limit(platforms)
+    parts = [
+        f"Series concept: {concept}" if concept else "Series concept: (general updates)",
+        f"\nToday's note from the creator:\n{note}",
+        f"\nWrite the post at or under {limit} characters.",
+    ]
+    if tone:
+        parts.append(f"Tone: {tone}.")
+    if platforms:
+        parts.append(f"Target platforms: {', '.join(platforms)}.")
+    if hashtags:
+        parts.append("Prefer these hashtags if relevant: " + " ".join("#" + h.lstrip("#") for h in hashtags))
+    return await _chat(SERIES_SYSTEM, "\n".join(parts))
+
+
+__all__ = ["generate_caption", "generate_series_post", "is_enabled", "provider", "PROVIDERS"]
