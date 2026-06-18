@@ -20,6 +20,7 @@ from app.content_processor import adapt_caption_for_platform
 from app.crypto import decrypt_json
 from app.database import (
     Account,
+    AgentJob,
     Post,
     PostResult,
     SYNC_DATABASE_URL,
@@ -119,9 +120,50 @@ async def _save_result(
         await session.commit()
 
 
+async def _enqueue_agent_job(user_id: int, post_id: int, platform: str,
+                             caption: str, media_paths: list) -> None:
+    """Queue a browser-login post for the user's local agent, and record a
+    'queued' PostResult that the agent will later update."""
+    async with get_session() as session:
+        session.add(AgentJob(
+            user_id=user_id, post_id=post_id, platform=platform,
+            caption=caption, media_paths=json.dumps([str(p) for p in media_paths]),
+            status="pending",
+        ))
+        session.add(PostResult(
+            user_id=user_id, post_id=post_id, platform=platform,
+            status="queued", error_msg="Waiting for your local agent",
+        ))
+        await session.commit()
+
+
+async def finalize_post_status(post_id: int) -> None:
+    """Recompute a post's status from its results + any outstanding agent jobs.
+    Called after server-side posting and after each agent result."""
+    async with get_session() as session:
+        post = await session.get(Post, post_id)
+        if post is None:
+            return
+        pending = await session.execute(
+            select(AgentJob).where(
+                AgentJob.post_id == post_id, AgentJob.status.in_(["pending", "claimed"])
+            )
+        )
+        if pending.scalars().first():
+            post.status = "posting"  # still waiting on the agent
+            await session.commit()
+            return
+        res = await session.execute(select(PostResult).where(PostResult.post_id == post_id))
+        results = res.scalars().all()
+        post.status = "done" if any(r.status == "success" for r in results) else "failed"
+        post.posted_at = utcnow()
+        await session.commit()
+
+
 async def execute_post(post_id: int) -> None:
     """Fire a scheduled post to all its target platforms. Resilient: one platform
-    failing never blocks the others."""
+    failing never blocks the others. Browser-login platforms are queued for the
+    user's local agent."""
     async with get_session() as session:
         post = await session.get(Post, post_id)
         if post is None:
@@ -148,11 +190,12 @@ async def execute_post(post_id: int) -> None:
     failures = 0
 
     for platform in platforms:
-        # Browser-login platforms post via the user's local agent (Phase 2), not server-side.
+        # Browser-login platforms run on the user's local agent — queue a job.
         if platform in SESSION_PLATFORMS:
-            await _save_result(user_id, post_id, platform, "skipped", None,
-                               "Posts via the PostPilot local agent (coming soon)")
-            failures += 1
+            await _enqueue_agent_job(
+                user_id, post_id, platform,
+                adapt_caption_for_platform(content, platform), media_paths,
+            )
             continue
 
         auth_data = await _load_auth_data(user_id, platform)
@@ -197,18 +240,9 @@ async def execute_post(post_id: int) -> None:
             await _save_result(user_id, post_id, platform, "failed", None, str(exc)[:500])
             failures += 1
 
-    # Finalize post status.
-    async with get_session() as session:
-        post = await session.get(Post, post_id)
-        if post:
-            if successes > 0:
-                post.status = "done"
-            else:
-                post.status = "failed"
-            post.posted_at = utcnow()
-            await session.commit()
-
-    logger.info("Post %s complete: %s ok, %s failed", post_id, successes, failures)
+    # Recompute status (stays "posting" if agent jobs are still pending).
+    await finalize_post_status(post_id)
+    logger.info("Post %s server-side complete: %s ok, %s failed", post_id, successes, failures)
 
 
 __all__ = ["scheduler", "execute_post", "schedule_post", "unschedule_post"]

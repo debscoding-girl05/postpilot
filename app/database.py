@@ -145,6 +145,37 @@ class PostResult(Base):
         }
 
 
+class AgentJob(Base):
+    """A posting job for a browser-login platform, executed by the user's local
+    agent (Phase 2). Carries a snapshot of the caption + media so the agent is
+    self-contained."""
+    __tablename__ = "agent_jobs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True, nullable=False)
+    post_id: Mapped[int] = mapped_column(ForeignKey("posts.id"), index=True)
+    platform: Mapped[str] = mapped_column(String(32), nullable=False)
+    caption: Mapped[str] = mapped_column(Text, default="")
+    media_paths: Mapped[str | None] = mapped_column(Text)  # JSON array of paths
+    status: Mapped[str] = mapped_column(String(16), default="pending", index=True)  # pending/claimed/done/failed
+    platform_post_id: Mapped[str | None] = mapped_column(Text)
+    error_msg: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    claimed_at: Mapped[datetime | None] = mapped_column(DateTime)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime)
+
+    def to_agent_dict(self) -> dict:
+        import json
+
+        media = json.loads(self.media_paths) if self.media_paths else []
+        return {
+            "id": self.id,
+            "platform": self.platform,
+            "caption": self.caption,
+            "media": ["/api/agent/media/" + Path(p).name for p in media],
+        }
+
+
 # --- Engine / session factory -------------------------------------------------
 
 engine = create_async_engine(DATABASE_URL, echo=False, future=True)
@@ -170,6 +201,7 @@ __all__ = [
     "Account",
     "Post",
     "PostResult",
+    "AgentJob",
     "Base",
     "engine",
     "async_session_maker",

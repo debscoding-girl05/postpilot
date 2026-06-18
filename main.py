@@ -71,6 +71,10 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="PostPilot", lifespan=lifespan)
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
+from app.agent_api import router as agent_router  # noqa: E402
+
+app.include_router(agent_router)
+
 
 @app.get("/")
 async def root():
@@ -139,6 +143,12 @@ async def logout(response: Response):
 @app.get("/api/auth/me")
 async def me(user: User = Depends(current_user)):
     return user.to_dict()
+
+
+@app.get("/api/auth/agent-token")
+async def agent_token(user: User = Depends(current_user)):
+    """The token the user pastes into their local agent (Phase 2)."""
+    return {"agent_token": user.agent_token}
 
 
 # --- AI -----------------------------------------------------------------------

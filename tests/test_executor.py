@@ -143,9 +143,9 @@ async def test_auth_failure_marks_skipped(monkeypatch):
     assert results["bluesky"].status == "skipped"
 
 
-async def test_session_platform_skipped_server_side(monkeypatch):
-    # Browser-login platforms (twitter/tiktok/etc.) are not posted server-side —
-    # they're handled by the local agent. execute_post should skip them cleanly.
+async def test_session_platform_queued_for_agent(monkeypatch):
+    # Browser-login platforms (twitter/tiktok/etc.) are queued for the local agent,
+    # not posted server-side. The post stays "posting" until the agent reports.
     monkeypatch.setattr(sched, "get_driver", lambda p: FakeDriver(p))
     monkeypatch.setattr(sched, "_load_auth_data", lambda u, p: _auth())
     uid = await _make_user()
@@ -154,6 +154,6 @@ async def test_session_platform_skipped_server_side(monkeypatch):
     await sched.execute_post(post_id)
 
     results = await _results(post_id)
-    assert results["tiktok"].status == "skipped"
+    assert results["tiktok"].status == "queued"
     assert "agent" in (results["tiktok"].error_msg or "").lower()
-    assert await _post_status(post_id) == "failed"
+    assert await _post_status(post_id) == "posting"
