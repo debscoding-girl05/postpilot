@@ -1,23 +1,115 @@
-"""Instagram driver using instagrapi with a saved session.
+"""Instagram driver — posts by driving the real instagram.com web composer over CDP.
 
-Session lives at data/sessions/instagram.json (instagrapi settings dump). Instagram
-does not support text-only posts, so a post with no media is skipped.
+instagrapi (private API) gets blocked with login_required even on fresh web
+sessions. Instead we drive the actual "Create" flow in the user's logged-in
+PostPilot Chrome (see app/platforms/browser.py).
+
+Instagram requires media — text-only posts are rejected.
+"Connected" means: you're logged into Instagram in the PostPilot Chrome window.
 """
 from __future__ import annotations
 
 import asyncio
-import json
-import tempfile
+import logging
+import time
 from pathlib import Path
 
-from app.content_processor import process_image_for_platform
 from app.platforms.base import BasePlatform, PostPayload
+from app.platforms.browser import cdp_available, cdp_page
 
-SESSION_PATH = Path("data/sessions/instagram.json")
+logger = logging.getLogger("postpilot.instagram")
+
+HOME_URL = "https://www.instagram.com/"
+DEBUG_SHOT = Path("data/media/instagram_debug.png")
 
 
 class InstagramSessionExpired(Exception):
-    """Raised when the saved session is no longer valid (login/challenge required)."""
+    """Kept for compatibility — raised when not logged in at post time."""
+
+
+# Selectors cover EN + FR. First visible match wins.
+NEW_POST_SELECTORS = [
+    "svg[aria-label='New post']",
+    "svg[aria-label='Nouvelle publication']",
+    "[aria-label='New post']",
+    "[aria-label='Nouvelle publication']",
+    "a[href='#'] svg[aria-label='New post']",
+]
+# After clicking "+", a small menu may offer Post vs. Reel — pick the plain Post.
+POST_MENU_SELECTORS = [
+    "svg[aria-label='Post']",
+    "[aria-label='Post']",
+    "span:has-text('Post')",
+    "span:has-text('Publication')",
+]
+SELECT_FILE_SELECTORS = [
+    "button:has-text('Select from computer')",
+    "button:has-text('ordinateur')",  # FR: "Sélectionner sur l'ordinateur"
+    "button:has-text('Selecionar do computador')",
+]
+NEXT_SELECTORS = [
+    "div[role='button']:has-text('Next')",
+    "button:has-text('Next')",
+    "div[role='button']:has-text('Suivant')",
+    "button:has-text('Suivant')",
+]
+SHARE_SELECTORS = [
+    "div[role='button']:has-text('Share')",
+    "button:has-text('Share')",
+    "div[role='button']:has-text('Partager')",
+    "button:has-text('Partager')",
+]
+CAPTION_SELECTORS = [
+    "div[aria-label='Write a caption...'][contenteditable='true']",
+    "div[aria-label='Écrivez une légende...'][contenteditable='true']",
+    "textarea[aria-label^='Write a caption']",
+    "div[contenteditable='true'][role='textbox']",
+]
+OK_DIALOG_SELECTORS = [
+    "button:has-text('OK')",
+    "button:has-text('Ok')",
+]
+LOGGED_OUT_MARKERS = ("/accounts/login", "/accounts/emailsignup")
+
+
+async def _find(page, selectors, timeout=12000):
+    deadline = time.monotonic() + timeout / 1000
+    while True:
+        for sel in selectors:
+            try:
+                el = await page.query_selector(sel)
+                if el and await el.is_visible():
+                    return el
+            except Exception:
+                continue
+        if time.monotonic() >= deadline:
+            return None
+        await asyncio.sleep(0.4)
+
+
+async def _click(page, selectors, timeout=12000) -> bool:
+    el = await _find(page, selectors, timeout=timeout)
+    if el is None:
+        return False
+    try:
+        await el.click()
+        return True
+    except Exception:
+        # Some IG controls are svgs; click the nearest button ancestor.
+        try:
+            await el.evaluate("e => (e.closest('button,[role=button],a') || e).click()")
+            return True
+        except Exception:
+            return False
+
+
+async def _dump(page, reason: str) -> None:
+    try:
+        DEBUG_SHOT.parent.mkdir(parents=True, exist_ok=True)
+        await page.screenshot(path=str(DEBUG_SHOT))
+        logger.error("Instagram debug [%s] url=%s", reason, page.url)
+    except Exception:
+        pass
 
 
 class InstagramPlatform(BasePlatform):
@@ -26,88 +118,64 @@ class InstagramPlatform(BasePlatform):
     supports_images = True
     supports_video = True
 
-    def _client(self):
-        from instagrapi import Client
-
-        cl = Client()
-        if not SESSION_PATH.exists():
-            return cl
-        data = json.loads(SESSION_PATH.read_text())
-        if isinstance(data, dict) and "cookies" in data:
-            # Playwright storage_state from the browser-login flow — instagrapi
-            # logs in from the web session's `sessionid` cookie.
-            sessionid = next(
-                (c["value"] for c in data["cookies"] if c["name"] == "sessionid"), None
-            )
-            if not sessionid:
-                raise InstagramSessionExpired("No Instagram sessionid in captured session")
-            cl.login_by_sessionid(sessionid)
-        else:
-            cl.load_settings(str(SESSION_PATH))
-        return cl
-
     async def authenticate(self, auth_data: dict) -> bool:
-        if not SESSION_PATH.exists():
-            return False
-
-        def _check() -> bool:
-            from instagrapi.exceptions import ChallengeRequired, LoginRequired
-
-            cl = self._client()
-            try:
-                cl.get_timeline_feed()  # cheap authenticated call
-                return True
-            except (LoginRequired, ChallengeRequired):
-                return False
-            except Exception:
-                return False
-
-        try:
-            return await asyncio.to_thread(_check)
-        except Exception:
-            return False
-
-    def _post_sync(self, payload: PostPayload) -> str:
-        from instagrapi.exceptions import ChallengeRequired, LoginRequired
-
-        if not payload.media_paths:
-            raise ValueError("Instagram requires at least one image or video")
-
-        caption = self.adapt_caption(payload.content)
-        paths = [Path(p) for p in payload.media_paths]
-
-        # Separate videos from images.
-        videos = [p for p in paths if p.suffix.lower() in (".mp4", ".mov")]
-        images = [p for p in paths if p not in videos]
-
-        tmp_files: list[str] = []
-        try:
-            cl = self._client()
-            if videos:
-                media = cl.video_upload(str(videos[0]), caption)
-            else:
-                processed: list[Path] = []
-                for p in images:
-                    img_bytes = process_image_for_platform(p, "instagram")
-                    tmp = tempfile.NamedTemporaryFile(suffix=".jpg", delete=False)
-                    tmp.write(img_bytes)
-                    tmp.close()
-                    tmp_files.append(tmp.name)
-                    processed.append(Path(tmp.name))
-
-                if len(processed) == 1:
-                    media = cl.photo_upload(str(processed[0]), caption)
-                else:
-                    media = cl.album_upload([str(p) for p in processed], caption)
-            return str(media.pk)
-        except (LoginRequired, ChallengeRequired) as exc:
-            raise InstagramSessionExpired(str(exc)) from exc
-        finally:
-            for f in tmp_files:
-                Path(f).unlink(missing_ok=True)
+        return await cdp_available()
 
     async def post(self, payload: PostPayload) -> str:
-        return await asyncio.to_thread(self._post_sync, payload)
+        if not payload.media_paths:
+            raise ValueError("Instagram requires at least one image or video")
+        caption = self.adapt_caption(payload.content)
+        media = [str(Path(p)) for p in payload.media_paths if Path(p).exists()]
+        if not media:
+            raise ValueError("Instagram media file not found")
+
+        async with cdp_page() as page:
+            await page.goto(HOME_URL, wait_until="domcontentloaded", timeout=60000)
+            await asyncio.sleep(3)
+            if any(m in page.url for m in LOGGED_OUT_MARKERS):
+                raise InstagramSessionExpired(
+                    "Not logged into Instagram — log in at instagram.com in the PostPilot Chrome window"
+                )
+
+            # Open the create dialog.
+            if not await _click(page, NEW_POST_SELECTORS, timeout=15000):
+                await _dump(page, "no_new_post")
+                raise RuntimeError(f"Could not open Instagram 'New post' (screenshot: {DEBUG_SHOT})")
+            await asyncio.sleep(1)
+            await _click(page, POST_MENU_SELECTORS, timeout=3000)  # optional submenu
+
+            # Attach the media via the "Select from computer" file chooser.
+            try:
+                async with page.expect_file_chooser(timeout=15000) as fc:
+                    if not await _click(page, SELECT_FILE_SELECTORS, timeout=12000):
+                        raise RuntimeError("select-from-computer button not found")
+                chooser = await fc.value
+                await chooser.set_files(media)
+            except Exception:
+                await _dump(page, "file_attach_failed")
+                raise RuntimeError(f"Could not attach media to Instagram (screenshot: {DEBUG_SHOT})")
+            await asyncio.sleep(3)
+            await _click(page, OK_DIALOG_SELECTORS, timeout=4000)  # "shared as reel" dialog
+
+            # Crop → Next, Edit → Next (two steps).
+            for _ in range(2):
+                if not await _click(page, NEXT_SELECTORS, timeout=20000):
+                    break
+                await asyncio.sleep(2)
+
+            # Caption.
+            cap = await _find(page, CAPTION_SELECTORS, timeout=15000)
+            if cap is not None:
+                await cap.click()
+                await page.keyboard.type(caption, delay=8)
+                await asyncio.sleep(1)
+
+            # Share, then wait for upload to finalize.
+            if not await _click(page, SHARE_SELECTORS, timeout=15000):
+                await _dump(page, "no_share")
+                raise RuntimeError(f"Could not find Instagram 'Share' button (screenshot: {DEBUG_SHOT})")
+            await asyncio.sleep(12)
+            return "posted"
 
 
 __all__ = ["InstagramPlatform", "InstagramSessionExpired"]

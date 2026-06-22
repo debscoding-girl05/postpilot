@@ -14,11 +14,11 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import os
 import time
 from pathlib import Path
 
 from app.platforms.base import BasePlatform, PostPayload
+from app.platforms.browser import cdp_available, cdp_page
 
 logger = logging.getLogger("postpilot.linkedin")
 
@@ -141,53 +141,23 @@ class LinkedInPlatform(BasePlatform):
     supports_video = True
 
     async def authenticate(self, auth_data: dict) -> bool:
-        # We can only truly verify at post time; treat a saved session as usable.
-        return SESSION_PATH.exists()
+        # Login lives in the PostPilot Chrome; verified for real at post time.
+        return await cdp_available()
 
     async def post(self, payload: PostPayload) -> str:
-        from playwright.async_api import async_playwright
-
-        if not SESSION_PATH.exists():
-            raise RuntimeError("No LinkedIn session — connect LinkedIn first")
-
         caption = self.adapt_caption(payload.content)
         media = [p for p in payload.media_paths if Path(p).exists()]
-        headless = os.getenv("LINKEDIN_HEADLESS", "false").lower() == "true"
 
-        async with async_playwright() as p:
-            try:
-                browser = await p.chromium.launch(
-                    headless=headless, channel="chromium", timeout=45000
-                )
-            except Exception as exc:
-                raise RuntimeError(
-                    "Could not launch a browser for LinkedIn. Browser-login platforms "
-                    "need a desktop (GUI) session and don't run reliably from the "
-                    "background service — run PostPilot from a terminal in your logged-in "
-                    f"session to post to LinkedIn. (launch error: {exc})"
-                ) from exc
-            context = await browser.new_context(storage_state=str(SESSION_PATH))
-            page = await context.new_page()
-
-            # Best-effort stealth (API differs across versions; never fatal).
-            try:
-                from playwright_stealth import Stealth  # type: ignore
-
-                await Stealth().apply_stealth_async(page)
-            except Exception:
-                try:
-                    from playwright_stealth import stealth_async  # type: ignore
-
-                    await stealth_async(page)
-                except Exception:
-                    pass
-
+        # Drive the real x.com/LinkedIn UI in the user's logged-in PostPilot Chrome.
+        async with cdp_page() as page:
             try:
                 await page.goto(FEED_URL, wait_until="domcontentloaded", timeout=60000)
                 await asyncio.sleep(4)
 
                 if "/login" in page.url or "/checkpoint" in page.url or "/authwall" in page.url:
-                    raise RuntimeError("LinkedIn session expired — reconnect LinkedIn")
+                    raise RuntimeError(
+                        "Not logged into LinkedIn — log in at linkedin.com in the PostPilot Chrome window"
+                    )
 
                 if media:
                     # Click the share-box "Vidéo"/"Photo" button directly — it opens a
@@ -267,9 +237,9 @@ class LinkedInPlatform(BasePlatform):
                 # Wait for the composer to close / upload to finalize.
                 await asyncio.sleep(12)
                 return "posted"
-            finally:
-                await context.close()
-                await browser.close()
+            except Exception:
+                await _dump_debug(page, "post_failed")
+                raise
 
 
 __all__ = ["LinkedInPlatform"]

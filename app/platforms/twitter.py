@@ -1,28 +1,96 @@
-"""Twitter/X driver using twikit with the browser session captured at connect.
+"""X (Twitter) driver — posts by driving the real x.com web composer over CDP.
 
-The connect flow saves a Playwright storage_state JSON (cookies + origins), but
-twikit wants a plain {name: value} cookie dict — so we convert it. twikit is async
-natively, so no thread offloading is needed.
+The reverse-engineered HTTP libraries (twikit) keep breaking against X's private
+API. Instead we drive the actual web UI in the user's logged-in PostPilot Chrome
+(see app/platforms/browser.py), which is robust and looks human.
+
+"Connected" means: you're logged into X in the PostPilot Chrome window.
 """
 from __future__ import annotations
 
-import json
-import tempfile
+import asyncio
+import logging
+import time
 from pathlib import Path
 
-from app.content_processor import process_image_for_platform
 from app.platforms.base import BasePlatform, PostPayload
+from app.platforms.browser import cdp_available, cdp_page
 
-SESSION_PATH = Path("data/sessions/twitter.json")
+logger = logging.getLogger("postpilot.twitter")
+
+COMPOSE_URL = "https://x.com/compose/post"
+DEBUG_SHOT = Path("data/media/twitter_debug.png")
+
+EDITOR_SELECTORS = [
+    "div[data-testid='tweetTextarea_0']",
+    "div[role='textbox'][contenteditable='true']",
+]
+FILE_INPUT_SELECTORS = [
+    "input[data-testid='fileInput']",
+    "input[type='file']",
+]
+POST_BUTTON_SELECTORS = [
+    "button[data-testid='tweetButton']",
+    "button[data-testid='tweetButtonInline']",
+]
+LOGGED_OUT_MARKERS = (
+    "/login", "/i/flow/login", "/account/access", "/logout",
+    "redirect_after_login", "mode=login", "/onboarding",
+)
+LOGIN_BUTTON_SELECTORS = [
+    "a[data-testid='loginButton']",
+    "a[data-testid='login']",
+    "a[href='/login']",
+]
+VIDEO_EXTS = (".mp4", ".mov", ".webm", ".m4v")
 
 
-def _cookies_from_storage_state() -> dict:
-    """Convert a Playwright storage_state file into twikit's {name: value} dict."""
-    data = json.loads(SESSION_PATH.read_text())
-    if isinstance(data, dict) and "cookies" in data:
-        return {c["name"]: c["value"] for c in data["cookies"]}
-    # Already a plain name->value dict (twikit's own format).
-    return data
+async def _looks_logged_out(page) -> bool:
+    if any(m in page.url for m in LOGGED_OUT_MARKERS):
+        return True
+    # Logged-out X bounces /compose/post to the bare landing page with a login CTA.
+    for sel in LOGIN_BUTTON_SELECTORS:
+        try:
+            el = await page.query_selector(sel)
+            if el and await el.is_visible():
+                return True
+        except Exception:
+            continue
+    return False
+
+
+async def _find(page, selectors, timeout=15000):
+    deadline = time.monotonic() + timeout / 1000
+    while True:
+        for sel in selectors:
+            try:
+                el = await page.query_selector(sel)
+                if el and await el.is_visible():
+                    return el
+            except Exception:
+                continue
+        if time.monotonic() >= deadline:
+            return None
+        await asyncio.sleep(0.4)
+
+
+async def _wait_enabled(page, selectors, timeout=180000):
+    """Wait for the Post button to become clickable (X disables it until the
+    caption is non-empty and any media finishes uploading)."""
+    deadline = time.monotonic() + timeout / 1000
+    while True:
+        for sel in selectors:
+            try:
+                el = await page.query_selector(sel)
+                if el and await el.is_visible():
+                    disabled = await el.get_attribute("aria-disabled")
+                    if disabled != "true":
+                        return el
+            except Exception:
+                continue
+        if time.monotonic() >= deadline:
+            return None
+        await asyncio.sleep(0.6)
 
 
 class TwitterPlatform(BasePlatform):
@@ -31,52 +99,55 @@ class TwitterPlatform(BasePlatform):
     supports_images = True
     supports_video = True
 
-    def _client(self):
-        from twikit import Client
-
-        client = Client("en-US")
-        client.set_cookies(_cookies_from_storage_state())
-        return client
-
     async def authenticate(self, auth_data: dict) -> bool:
-        if not SESSION_PATH.exists():
-            return False
-        try:
-            client = self._client()
-            await client.user()  # resolves the authenticated user
-            return True
-        except Exception:
-            return False
+        # Login lives in the PostPilot Chrome; we can only confirm it's reachable.
+        return await cdp_available()
 
     async def post(self, payload: PostPayload) -> str:
-        client = self._client()
         caption = self.adapt_caption(payload.content)
+        media = [Path(p) for p in payload.media_paths if Path(p).exists()][:4]
 
-        media_ids: list[str] = []
-        tmp_files: list[str] = []
-        try:
-            for path in payload.media_paths[:4]:
-                path = Path(path)
-                suffix = path.suffix.lower()
-                if suffix in (".mp4", ".mov"):
-                    media_id = await client.upload_media(str(path))
-                else:
-                    img_bytes = process_image_for_platform(path, "twitter")
-                    tmp = tempfile.NamedTemporaryFile(suffix=".png", delete=False)
-                    tmp.write(img_bytes)
-                    tmp.close()
-                    tmp_files.append(tmp.name)
-                    media_id = await client.upload_media(tmp.name)
-                media_ids.append(media_id)
+        async with cdp_page() as page:
+            await page.goto(COMPOSE_URL, wait_until="domcontentloaded", timeout=60000)
+            await asyncio.sleep(3)
+            if await _looks_logged_out(page):
+                raise RuntimeError("Not logged into X — log in at x.com in the PostPilot Chrome window")
 
-            if media_ids:
-                tweet = await client.create_tweet(text=caption, media_ids=media_ids)
-            else:
-                tweet = await client.create_tweet(text=caption)
-            return str(tweet.id)
-        finally:
-            for f in tmp_files:
-                Path(f).unlink(missing_ok=True)
+            editor = await _find(page, EDITOR_SELECTORS, timeout=20000)
+            if editor is None:
+                await _dump(page, "no_editor")
+                raise RuntimeError(f"Could not find the X composer (screenshot: {DEBUG_SHOT})")
+            await editor.click()
+            await page.keyboard.type(caption, delay=10)
+            await asyncio.sleep(1)
+
+            if media:
+                file_input = await _find(page, FILE_INPUT_SELECTORS, timeout=10000)
+                if file_input is None:
+                    await _dump(page, "no_file_input")
+                    raise RuntimeError(f"Could not find X media upload input (screenshot: {DEBUG_SHOT})")
+                await file_input.set_input_files([str(m) for m in media])
+                # Video transcodes server-side; the Post button stays disabled until done.
+                await asyncio.sleep(4)
+
+            post_btn = await _wait_enabled(page, POST_BUTTON_SELECTORS, timeout=240000)
+            if post_btn is None:
+                await _dump(page, "post_disabled")
+                raise RuntimeError(
+                    f"X Post button never enabled (upload may have failed; screenshot: {DEBUG_SHOT})"
+                )
+            await post_btn.click()
+            await asyncio.sleep(8)  # let the post commit / modal close
+            return "posted"
+
+
+async def _dump(page, reason: str) -> None:
+    try:
+        DEBUG_SHOT.parent.mkdir(parents=True, exist_ok=True)
+        await page.screenshot(path=str(DEBUG_SHOT))
+        logger.error("X debug [%s] url=%s", reason, page.url)
+    except Exception:
+        pass
 
 
 __all__ = ["TwitterPlatform"]

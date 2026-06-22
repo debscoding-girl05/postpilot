@@ -17,11 +17,11 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import os
 import time
 from pathlib import Path
 
 from app.platforms.base import BasePlatform, PostPayload
+from app.platforms.browser import cdp_available, cdp_page
 
 logger = logging.getLogger("postpilot.tiktok")
 
@@ -168,50 +168,26 @@ class TikTokPlatform(BasePlatform):
     supports_video = True
 
     async def authenticate(self, auth_data: dict) -> bool:
-        return TIKTOK_PROFILE_DIR.exists() and any(TIKTOK_PROFILE_DIR.iterdir())
+        # Login lives in the PostPilot Chrome; verified for real at post time.
+        return await cdp_available()
 
     async def post(self, payload: PostPayload) -> str:
-        from playwright.async_api import async_playwright
-
-        if not (TIKTOK_PROFILE_DIR.exists() and any(TIKTOK_PROFILE_DIR.iterdir())):
-            raise RuntimeError("No TikTok session — connect TikTok first")
-
         videos = [p for p in payload.media_paths if Path(p).suffix.lower() in VIDEO_EXTS]
         if not videos:
             raise ValueError("TikTok requires a video file")
         video_path = str(videos[0])
         caption = self.adapt_caption(payload.content)
-        headless = os.getenv("TIKTOK_HEADLESS", "false").lower() == "true"
 
-        async with async_playwright() as p:
-            # Persistent real-Chrome profile — the same one used to log in.
-            context = await p.chromium.launch_persistent_context(
-                str(TIKTOK_PROFILE_DIR),
-                channel="chrome",
-                headless=headless,
-                args=["--disable-blink-features=AutomationControlled"],
-            )
-            page = context.pages[0] if context.pages else await context.new_page()
-
-            # Best-effort stealth.
-            try:
-                from playwright_stealth import Stealth  # type: ignore
-
-                await Stealth().apply_stealth_async(page)
-            except Exception:
-                try:
-                    from playwright_stealth import stealth_async  # type: ignore
-
-                    await stealth_async(page)
-                except Exception:
-                    pass
-
+        # Drive the TikTok Studio upload page in the user's logged-in PostPilot Chrome.
+        async with cdp_page() as page:
             try:
                 # 1. Open the upload page and wait for the upload widget to load.
                 await page.goto(UPLOAD_URLS[0], wait_until="domcontentloaded", timeout=60000)
                 await asyncio.sleep(4)
                 if "/login" in page.url:
-                    raise RuntimeError("TikTok session expired — reconnect TikTok")
+                    raise RuntimeError(
+                        "Not logged into TikTok — log in at tiktok.com in the PostPilot Chrome window"
+                    )
                 await _dismiss_tour(page, press_escape=True)
                 if await _is_blocked(page):
                     await _dump_debug(page, "tiktok_blocked")
@@ -339,8 +315,9 @@ class TikTokPlatform(BasePlatform):
                 # Give TikTok time to submit.
                 await asyncio.sleep(12)
                 return "posted"
-            finally:
-                await context.close()
+            except Exception:
+                await _dump_debug(page, "post_failed")
+                raise
 
 
 __all__ = ["TikTokPlatform"]

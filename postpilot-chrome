@@ -1,0 +1,53 @@
+#!/usr/bin/env bash
+# Launch a real Chrome that PostPilot can drive over CDP to post to the locked
+# platforms (X, Instagram, LinkedIn, TikTok).
+#
+# Recent Chrome blocks remote-debugging on the DEFAULT profile for security, so
+# we use a dedicated PostPilot profile. Log into each platform ONCE in the window
+# this opens — those logins persist, and PostPilot reuses them every time.
+#
+# Usage:
+#   ./postpilot-chrome            # open the PostPilot browser (keep it running)
+#   ./postpilot-chrome --check    # just report whether CDP is already up
+#
+# Env:
+#   POSTPILOT_CHROME_PORT     CDP port (default 9222)
+#   POSTPILOT_CHROME_PROFILE  profile dir (default ~/.postpilot/chrome-profile)
+set -euo pipefail
+
+PORT="${POSTPILOT_CHROME_PORT:-9222}"
+PROFILE="${POSTPILOT_CHROME_PROFILE:-$HOME/.postpilot/chrome-profile}"
+CHROME="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+
+if [[ "${1:-}" == "--check" ]]; then
+  if curl -s --max-time 2 "http://127.0.0.1:${PORT}/json/version" >/dev/null; then
+    echo "PostPilot Chrome is UP on port ${PORT}."
+    exit 0
+  fi
+  echo "PostPilot Chrome is NOT running on port ${PORT}. Run ./postpilot-chrome"
+  exit 1
+fi
+
+if [[ ! -x "$CHROME" ]]; then
+  echo "Google Chrome not found at: $CHROME" >&2
+  exit 1
+fi
+
+if curl -s --max-time 2 "http://127.0.0.1:${PORT}/json/version" >/dev/null; then
+  echo "PostPilot Chrome is already running on port ${PORT}. Nothing to do."
+  exit 0
+fi
+
+mkdir -p "$PROFILE"
+echo "Opening PostPilot Chrome (profile: $PROFILE, CDP port: $PORT)…"
+echo "→ First time: log into X, Instagram, LinkedIn and TikTok in this window."
+echo "→ Keep this window open while PostPilot posts. Close it to stop."
+
+# Real Chrome, dedicated profile, remote debugging on. --no-first-run skips the
+# setup wizard; the profile dir keeps all logins between launches.
+exec "$CHROME" \
+  --remote-debugging-port="$PORT" \
+  --user-data-dir="$PROFILE" \
+  --no-first-run \
+  --no-default-browser-check \
+  --restore-last-session
