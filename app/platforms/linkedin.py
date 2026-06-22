@@ -155,7 +155,17 @@ class LinkedInPlatform(BasePlatform):
         headless = os.getenv("LINKEDIN_HEADLESS", "false").lower() == "true"
 
         async with async_playwright() as p:
-            browser = await p.chromium.launch(headless=headless, channel="chromium")
+            try:
+                browser = await p.chromium.launch(
+                    headless=headless, channel="chromium", timeout=45000
+                )
+            except Exception as exc:
+                raise RuntimeError(
+                    "Could not launch a browser for LinkedIn. Browser-login platforms "
+                    "need a desktop (GUI) session and don't run reliably from the "
+                    "background service — run PostPilot from a terminal in your logged-in "
+                    f"session to post to LinkedIn. (launch error: {exc})"
+                ) from exc
             context = await browser.new_context(storage_state=str(SESSION_PATH))
             page = await context.new_page()
 

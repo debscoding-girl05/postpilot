@@ -117,6 +117,30 @@ async def _save_result(
         await session.commit()
 
 
+async def _authenticate_with_retry(driver, auth_data, platform) -> tuple[bool, str]:
+    """Authenticate, retrying transient failures for credential (API) platforms.
+
+    Returns (ok, error_message). A momentary network/rate-limit blip during a
+    scheduled run shouldn't kill the post — Bluesky/Mastodon logins are cheap to
+    retry. Browser-login platforms are tried once (a retry just re-launches a
+    browser). The last real error is returned so the result is informative.
+    """
+    attempts = 3 if platform in CREDENTIAL_PLATFORMS else 1
+    last_err = "unknown error"
+    for attempt in range(attempts):
+        try:
+            if await driver.authenticate(auth_data):
+                return True, ""
+            last_err = "invalid credentials or login rejected"
+        except Exception as exc:  # noqa: BLE001
+            last_err = f"{exc.__class__.__name__}: {exc}"[:300]
+            logger.warning("Auth attempt %s/%s for %s failed: %s",
+                           attempt + 1, attempts, platform, last_err)
+        if attempt < attempts - 1:
+            await asyncio.sleep(2 * (attempt + 1))  # 2s, 4s backoff
+    return False, last_err
+
+
 async def execute_post(post_id: int) -> None:
     """Fire a scheduled post to all its target platforms. Resilient: one platform
     failing never blocks the others."""
@@ -158,15 +182,16 @@ async def execute_post(post_id: int) -> None:
             failures += 1
             continue
 
-        try:
-            ok = await driver.authenticate(auth_data)
-        except Exception as exc:  # noqa: BLE001
-            ok = False
-            logger.exception("Auth error for %s", platform)
-
+        ok, auth_err = await _authenticate_with_retry(driver, auth_data, platform)
         if not ok:
-            await _mark_account_status(platform, "expired")
-            await _save_result(post_id, platform, "skipped", None, "Authentication failed/expired")
+            # Credential platforms (Bluesky/Mastodon) hit transient network/rate-limit
+            # blips; don't mark the account expired on a likely-transient failure — just
+            # record the real reason so it's not a mystery next time.
+            if platform not in CREDENTIAL_PLATFORMS:
+                await _mark_account_status(platform, "expired")
+            await _save_result(
+                post_id, platform, "skipped", None, f"Authentication failed: {auth_err}"
+            )
             failures += 1
             continue
 
