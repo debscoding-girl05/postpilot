@@ -15,7 +15,7 @@ class BlueskyPlatform(BasePlatform):
     name = "bluesky"
     char_limit = 300
     supports_images = True
-    supports_video = False
+    supports_video = True
 
     def __init__(self) -> None:
         self._auth: dict = {}
@@ -42,6 +42,17 @@ class BlueskyPlatform(BasePlatform):
 
         client = self._login_sync(self._auth)
         caption = self.adapt_caption(payload.content)
+
+        # A single video takes priority: Bluesky allows one video per post (no images).
+        video = next(
+            (p for p in payload.media_paths
+             if str(p).lower().endswith((".mp4", ".mov", ".webm"))),
+            None,
+        )
+        if video:
+            with open(video, "rb") as fh:
+                response = client.send_video(text=caption, video=fh.read(), video_alt="")
+            return response.uri
 
         if payload.media_paths:
             images = []

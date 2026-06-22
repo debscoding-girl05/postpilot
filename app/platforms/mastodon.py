@@ -61,7 +61,21 @@ class MastodonPlatform(BasePlatform):
             media_ids.append(media["id"])
 
         if media_ids:
-            status = client.status_post(status=caption, media_ids=media_ids)
+            # Video/large media is transcoded asynchronously; the server rejects the
+            # status until it's done ("Cannot attach files that have not finished
+            # processing"). Retry with backoff until it accepts (up to ~90s).
+            import time
+
+            status = None
+            for attempt in range(18):
+                try:
+                    status = client.status_post(status=caption, media_ids=media_ids)
+                    break
+                except Exception as exc:  # noqa: BLE001
+                    if "processing" in str(exc).lower() and attempt < 17:
+                        time.sleep(5)
+                        continue
+                    raise
         else:
             status = client.status_post(status=caption)
         return str(status["id"])
