@@ -1,0 +1,214 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>PostPilot — How it works</title>
+  <meta name="description" content="PostPilot: write once, post everywhere. What works, what doesn't, and how to test it." />
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: { extend: {
+        colors: { accent: "#7c5cff", accenthi: "#9277ff" },
+        fontFamily: {
+          sans: ['"Plus Jakarta Sans"', "system-ui", "sans-serif"],
+          display: ['"Space Grotesk"', "system-ui", "sans-serif"],
+        },
+      } },
+    };
+  </script>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet" />
+  <script src="https://cdn.jsdelivr.net/npm/iconify-icon@2/dist/iconify-icon.min.js"></script>
+  <style>
+    html, body { background:#0b0e14; color:#e8ebf2; font-family:"Plus Jakarta Sans", system-ui, sans-serif; }
+    .font-display { font-family:"Space Grotesk", system-ui, sans-serif; }
+    .muted { color:#94a0b8; }
+    .card { background:#141925; border:1px solid rgba(255,255,255,.06); border-radius:1rem; }
+    .hero { background:
+      radial-gradient(1100px 460px at 18% -10%, rgba(124,92,255,.22), transparent 60%),
+      radial-gradient(900px 420px at 100% 0%, rgba(99,102,241,.14), transparent 55%); }
+    code { background:#0f1420; border:1px solid rgba(255,255,255,.08); border-radius:.4rem; padding:.08rem .4rem; font-size:.85em; }
+    pre { background:#0f1420; border:1px solid rgba(255,255,255,.08); border-radius:.7rem; padding:.9rem 1rem; overflow-x:auto; }
+    pre code { background:none; border:none; padding:0; }
+    .pill { font-size:.7rem; padding:.12rem .55rem; border-radius:999px; font-weight:600; }
+    table { border-collapse:collapse; width:100%; }
+    th, td { text-align:left; padding:.65rem .8rem; border-bottom:1px solid rgba(255,255,255,.06); vertical-align:top; }
+    th { color:#94a0b8; font-weight:600; font-size:.75rem; text-transform:uppercase; letter-spacing:.04em; }
+    a.link { color:#9277ff; }
+    .wrap { max-width:62rem; margin:0 auto; padding:0 1.25rem; }
+  </style>
+</head>
+<body>
+  <!-- HERO -->
+  <header class="hero border-b border-white/5">
+    <div class="wrap py-14">
+      <div class="flex items-center gap-3 mb-5">
+        <div class="w-11 h-11 rounded-2xl bg-accent/20 border border-accent/40 flex items-center justify-center">
+          <iconify-icon icon="fluent:send-24-filled" class="text-accenthi text-2xl"></iconify-icon>
+        </div>
+        <span class="font-display font-bold text-xl">PostPilot</span>
+      </div>
+      <h1 class="font-display font-bold text-3xl sm:text-4xl leading-tight mb-3">Write once. Post everywhere.</h1>
+      <p class="muted max-w-2xl text-[15px] leading-relaxed">
+        PostPilot is a lightweight, self-hosted social-media autopilot. Compose a post (with AI help if you
+        like), generate an image or short video, then publish or schedule it across Bluesky, Mastodon, X,
+        LinkedIn, Instagram and TikTok — from one place. This page explains exactly how it works,
+        what's reliable, what isn't, and how to test it yourself.
+      </p>
+      <div class="flex flex-wrap gap-2 mt-6 text-xs">
+        <span class="pill bg-emerald-500/15 text-emerald-300 border border-emerald-500/25">5 platforms automated</span>
+        <span class="pill bg-white/5 text-slate-300 border border-white/10">No build step · single Python process</span>
+        <span class="pill bg-white/5 text-slate-300 border border-white/10">Your accounts stay on your machine</span>
+      </div>
+    </div>
+  </header>
+
+  <main class="wrap py-12 space-y-14">
+
+    <!-- THE MODEL -->
+    <section>
+      <h2 class="font-display font-semibold text-xl mb-4 flex items-center gap-2">
+        <iconify-icon icon="fluent:flow-24-regular" class="text-accenthi"></iconify-icon> How it works
+      </h2>
+      <p class="muted text-sm mb-5 max-w-3xl">PostPilot reaches each platform the most reliable way available. There are three lanes:</p>
+      <div class="grid md:grid-cols-3 gap-3">
+        <div class="card p-5">
+          <iconify-icon icon="fluent:cloud-24-regular" class="text-accenthi text-2xl"></iconify-icon>
+          <p class="font-semibold mt-3 mb-1">1 · Official APIs</p>
+          <p class="muted text-sm leading-relaxed">Bluesky &amp; Mastodon post directly through their public APIs — server-side, instant, rock-solid. No browser needed.</p>
+        </div>
+        <div class="card p-5">
+          <iconify-icon icon="simple-icons:googlechrome" class="text-accenthi text-2xl"></iconify-icon>
+          <p class="font-semibold mt-3 mb-1">2 · Your real Chrome (CDP)</p>
+          <p class="muted text-sm leading-relaxed">X, LinkedIn &amp; Instagram have no usable posting API, so PostPilot drives a real Chrome you've logged into, over the DevTools protocol — like a human, but automated.</p>
+        </div>
+        <div class="card p-5">
+          <iconify-icon icon="fluent:hand-right-24-regular" class="text-accenthi text-2xl"></iconify-icon>
+          <p class="font-semibold mt-3 mb-1">3 · Manual handoff</p>
+          <p class="muted text-sm leading-relaxed">TikTok actively blocks automated uploads. PostPilot prepares the video + caption; you do the final tap. Honest about the one wall we can't climb.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- WHAT WORKS / WHAT DOESN'T -->
+    <section>
+      <h2 class="font-display font-semibold text-xl mb-4 flex items-center gap-2">
+        <iconify-icon icon="fluent:checkmark-circle-24-regular" class="text-accenthi"></iconify-icon> What works, what doesn't
+      </h2>
+      <div class="card overflow-hidden">
+        <div style="overflow-x:auto">
+        <table>
+          <thead>
+            <tr><th>Platform</th><th>Status</th><th>How it posts</th><th>Video</th></tr>
+          </thead>
+          <tbody class="text-sm">
+            <tr>
+              <td class="font-medium"><iconify-icon icon="simple-icons:bluesky" style="color:#0085ff"></iconify-icon> Bluesky</td>
+              <td><span class="pill bg-emerald-500/15 text-emerald-300">Automated</span></td>
+              <td class="muted">Official API (app password)</td><td class="muted">Yes</td>
+            </tr>
+            <tr>
+              <td class="font-medium"><iconify-icon icon="simple-icons:mastodon" style="color:#6364ff"></iconify-icon> Mastodon</td>
+              <td><span class="pill bg-emerald-500/15 text-emerald-300">Automated</span></td>
+              <td class="muted">Official API (access token)</td><td class="muted">Yes</td>
+            </tr>
+            <tr>
+              <td class="font-medium"><iconify-icon icon="simple-icons:x" style="color:#fff"></iconify-icon> X (Twitter)</td>
+              <td><span class="pill bg-emerald-500/15 text-emerald-300">Automated</span></td>
+              <td class="muted">Real Chrome via CDP</td><td class="muted">Yes</td>
+            </tr>
+            <tr>
+              <td class="font-medium"><iconify-icon icon="simple-icons:linkedin" style="color:#0a66c2"></iconify-icon> LinkedIn</td>
+              <td><span class="pill bg-emerald-500/15 text-emerald-300">Automated</span></td>
+              <td class="muted">Real Chrome via CDP</td><td class="muted">Yes</td>
+            </tr>
+            <tr>
+              <td class="font-medium"><iconify-icon icon="simple-icons:instagram" style="color:#e1306c"></iconify-icon> Instagram</td>
+              <td><span class="pill bg-emerald-500/15 text-emerald-300">Automated</span></td>
+              <td class="muted">Real Chrome via CDP</td><td class="muted">Yes (media required)</td>
+            </tr>
+            <tr>
+              <td class="font-medium"><iconify-icon icon="simple-icons:tiktok" style="color:#fff"></iconify-icon> TikTok</td>
+              <td><span class="pill bg-amber-500/15 text-amber-300">Manual</span></td>
+              <td class="muted">Anti-bot blocks automation — post by hand</td><td class="muted">Yes (manual)</td>
+            </tr>
+          </tbody>
+        </table>
+        </div>
+      </div>
+      <div class="grid sm:grid-cols-2 gap-3 mt-4">
+        <div class="card p-4 text-sm">
+          <p class="font-semibold mb-1 flex items-center gap-2"><iconify-icon icon="fluent:sparkle-24-filled" class="text-accenthi"></iconify-icon> Also works</p>
+          <ul class="muted space-y-1 leading-relaxed">
+            <li>• AI captions (one idea → polished, per-platform length)</li>
+            <li>• AI images + slideshow video (vertical MP4)</li>
+            <li>• Media preview before posting</li>
+            <li>• Scheduling that survives restarts</li>
+            <li>• Content Series + calendar (recurring concepts, AI-drafted)</li>
+            <li>• Per-platform results — one failure never blocks the others</li>
+          </ul>
+        </div>
+        <div class="card p-4 text-sm">
+          <p class="font-semibold mb-1 flex items-center gap-2"><iconify-icon icon="fluent:warning-24-regular" class="text-amber-300"></iconify-icon> Known limits</p>
+          <ul class="muted space-y-1 leading-relaxed">
+            <li>• <b>TikTok</b>: automated upload is blocked by its bot-detection</li>
+            <li>• X / LinkedIn / Instagram need the <b>PostPilot Chrome</b> open + logged in</li>
+            <li>• AI text-to-video is off unless a provider key is set</li>
+            <li>• Web UIs change — a driver may need a selector tweak now and then</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <!-- HOW TO TEST -->
+    <section>
+      <h2 class="font-display font-semibold text-xl mb-4 flex items-center gap-2">
+        <iconify-icon icon="fluent:beaker-24-regular" class="text-accenthi"></iconify-icon> How to test everything
+      </h2>
+      <ol class="space-y-4">
+        <li class="card p-5">
+          <p class="font-semibold mb-1">1 · Connect the API platforms</p>
+          <p class="muted text-sm leading-relaxed">In <b>Accounts</b>, paste a Bluesky <i>app password</i> and a Mastodon <i>access token</i>. Compose a short post, tick Bluesky + Mastodon, and hit <b>Post now</b> — both should go live instantly. This proves the core pipeline.</p>
+        </li>
+        <li class="card p-5">
+          <p class="font-semibold mb-1">2 · Start the PostPilot Chrome</p>
+          <p class="muted text-sm leading-relaxed mb-2">For X, LinkedIn &amp; Instagram, open the dedicated browser and log into each site once (logins persist):</p>
+          <pre><code>cd postpilot && ./postpilot-chrome</code></pre>
+          <p class="muted text-xs mt-2">Keep this window open while posting. It uses a separate Chrome profile, so it won't touch your everyday browser.</p>
+        </li>
+        <li class="card p-5">
+          <p class="font-semibold mb-1">3 · Post to the browser platforms</p>
+          <p class="muted text-sm leading-relaxed">Compose a post with an image or video, tick X / LinkedIn / Instagram, and <b>Post now</b>. PostPilot drives your Chrome to publish each one. Watch <b>History</b> for per-platform success/failure (failures save a debug screenshot).</p>
+        </li>
+        <li class="card p-5">
+          <p class="font-semibold mb-1">4 · TikTok (manual)</p>
+          <p class="muted text-sm leading-relaxed">PostPilot generates the video + caption; download them from the post and upload on TikTok yourself. Automated upload is blocked on TikTok's side.</p>
+        </li>
+        <li class="card p-5">
+          <p class="font-semibold mb-1">5 · Try the AI + scheduling</p>
+          <p class="muted text-sm leading-relaxed">Use <b>Generate caption</b> from a rough idea, generate an image or slideshow, schedule a post for a few minutes out and confirm it fires on its own. Set up a <b>Series</b> to auto-draft recurring posts.</p>
+        </li>
+      </ol>
+    </section>
+
+    <!-- PRIVACY / SETUP NOTE -->
+    <section class="card p-5 flex items-start gap-3">
+      <iconify-icon icon="fluent:shield-checkmark-24-regular" class="text-accenthi text-xl shrink-0 mt-0.5"></iconify-icon>
+      <p class="muted text-sm leading-relaxed">
+        <b class="text-slate-200">Your data stays with you.</b> PostPilot is self-hosted — it runs as one small process on your
+        own machine. Account credentials are encrypted locally and your browser logins live in the PostPilot Chrome
+        profile on your computer, never on a third-party server.
+      </p>
+    </section>
+  </main>
+
+  <footer class="border-t border-white/5">
+    <div class="wrap py-8 text-xs muted flex flex-wrap items-center justify-between gap-3">
+      <span>PostPilot — self-hosted social autopilot.</span>
+      <a class="link" href="https://github.com/debscoding-girl05/postpilot">github.com/debscoding-girl05/postpilot</a>
+    </div>
+  </footer>
+</body>
+</html>

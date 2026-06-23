@@ -67,9 +67,13 @@ app = FastAPI(title="PostPilot", lifespan=lifespan)
 APP_PASSWORD = os.getenv("APP_PASSWORD")
 
 
+# Paths anyone can reach even when APP_PASSWORD is set — the public explainer.
+PUBLIC_PATHS = {"/health", "/guide"}
+
+
 @app.middleware("http")
 async def _basic_auth(request, call_next):
-    if APP_PASSWORD and request.url.path != "/health":
+    if APP_PASSWORD and request.url.path not in PUBLIC_PATHS:
         import base64
         import secrets
 
@@ -97,6 +101,12 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 @app.get("/")
 async def root():
     return FileResponse("static/index.html")
+
+
+@app.get("/guide")
+async def public_guide():
+    """Public, no-password explainer page (what works, what doesn't, how to test)."""
+    return FileResponse("static/guide.html")
 
 
 # --- AI -----------------------------------------------------------------------

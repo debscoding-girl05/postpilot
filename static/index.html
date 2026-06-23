@@ -54,6 +54,14 @@
     .card-hover:hover { transform: translateY(-3px); border-color: rgba(124,92,255,.45);
             box-shadow: 0 12px 34px rgba(2,4,10,.5); }
 
+    /* Guide pills + inline code */
+    .pill-ok { font-size:.65rem; font-weight:700; padding:.08rem .45rem; border-radius:999px;
+            background:rgba(16,185,129,.16); color:#6ee7b7; }
+    .pill-warn { font-size:.65rem; font-weight:700; padding:.08rem .45rem; border-radius:999px;
+            background:rgba(245,158,11,.16); color:#fcd34d; }
+    code { background:#0f1420; border:1px solid rgba(255,255,255,.08); border-radius:.35rem;
+            padding:.05rem .35rem; font-size:.85em; }
+
     /* Inputs */
     .inp { background:#0f1420; border:1px solid rgba(255,255,255,.07); border-radius:.7rem;
            color:#e8ebf2; transition:border-color .15s, box-shadow .15s; }
@@ -533,22 +541,29 @@
             </template>
           </div>
 
-          <!-- Connecting accounts -->
-          <h2 class="text-lg font-semibold font-display mb-3 flex items-center gap-2"><iconify-icon icon="fluent:link-24-regular" class="text-accenthi"></iconify-icon> Connecting accounts</h2>
+          <!-- What works -->
+          <h2 class="text-lg font-semibold font-display mb-3 flex items-center gap-2"><iconify-icon icon="fluent:checkmark-circle-24-regular" class="text-accenthi"></iconify-icon> What works, what doesn't</h2>
           <div class="card p-5 mb-8 space-y-4 text-sm">
             <div class="flex items-start gap-3">
               <iconify-icon icon="simple-icons:bluesky" style="color:#0085ff" class="text-xl mt-0.5 shrink-0"></iconify-icon>
-              <div><span class="font-medium">Bluesky &amp; Mastodon</span> <span class="text-muted">— paste an app password (Bluesky) or access token (Mastodon) in the Accounts tab. Official APIs, the most reliable.</span></div>
+              <div><span class="font-medium">Bluesky &amp; Mastodon</span> <span class="pill-ok">Automated</span> <span class="text-muted">— paste an app password (Bluesky) or access token (Mastodon) in Accounts. Official APIs, server-side, most reliable.</span></div>
             </div>
             <div class="flex items-start gap-3">
-              <iconify-icon icon="simple-icons:linkedin" style="color:#0a66c2" class="text-xl mt-0.5 shrink-0"></iconify-icon>
-              <div><span class="font-medium">LinkedIn, Instagram, Twitter/X</span> <span class="text-muted">— click “Connect via browser”, log in once in the window that opens; PostPilot reuses that session to post for you.</span></div>
+              <iconify-icon icon="simple-icons:x" style="color:#e8ebf2" class="text-xl mt-0.5 shrink-0"></iconify-icon>
+              <div><span class="font-medium">X, LinkedIn &amp; Instagram</span> <span class="pill-ok">Automated</span> <span class="text-muted">— run <code>./postpilot-chrome</code> and log into each site once; PostPilot drives that real Chrome to post for you (it must stay open).</span></div>
             </div>
             <div class="flex items-start gap-3">
               <iconify-icon icon="simple-icons:tiktok" style="color:#ffffff" class="text-xl mt-0.5 shrink-0"></iconify-icon>
-              <div><span class="font-medium">TikTok</span> <span class="text-muted">— TikTok blocks automated uploads; treat it as semi-manual: PostPilot prepares the video + caption and you do the final upload by hand.</span></div>
+              <div><span class="font-medium">TikTok</span> <span class="pill-warn">Manual</span> <span class="text-muted">— TikTok's bot-detection blocks automated uploads even via a real browser. PostPilot prepares the video + caption; you do the final upload by hand.</span></div>
             </div>
           </div>
+
+          <!-- Public guide link -->
+          <a href="/guide" target="_blank" class="card card-hover p-4 mb-8 flex items-center gap-3 text-sm no-underline">
+            <iconify-icon icon="fluent:globe-24-regular" class="text-accenthi text-xl shrink-0"></iconify-icon>
+            <div class="flex-1"><span class="font-medium">Public explainer page</span> <span class="text-muted">— a shareable, no-password recap of what works and how to test it.</span></div>
+            <iconify-icon icon="fluent:open-24-regular" class="text-muted"></iconify-icon>
+          </a>
 
           <!-- Features -->
           <h2 class="text-lg font-semibold font-display mb-3 flex items-center gap-2"><iconify-icon icon="fluent:wand-24-regular" class="text-accenthi"></iconify-icon> Create &amp; schedule</h2>
@@ -702,10 +717,10 @@
         supported: ["bluesky","mastodon","instagram","twitter","linkedin","tiktok"],
         limits: { twitter:280, instagram:2200, bluesky:300, mastodon:500, linkedin:3000, tiktok:2200 },
         guideSteps: [
-          { i:"fluent:plug-connected-24-regular", t:"1. Connect", d:"Link your social accounts once in the Accounts tab." },
+          { i:"fluent:plug-connected-24-regular", t:"1. Connect", d:"Paste API keys for Bluesky/Mastodon; for X, LinkedIn & Instagram run ./postpilot-chrome and log in once." },
           { i:"fluent:compose-24-regular", t:"2. Compose", d:"Write your post and pick which platforms to send it to." },
           { i:"fluent:wand-24-regular", t:"3. Enhance", d:"Optionally generate captions, images or a slideshow video with AI." },
-          { i:"fluent:send-24-regular", t:"4. Publish", d:"Schedule for later or post now — PostPilot does the rest." },
+          { i:"fluent:send-24-regular", t:"4. Publish", d:"Schedule for later or post now — PostPilot posts each platform for you." },
         ],
         guideFeatures: [
           { i:"fluent:sparkle-24-filled", t:"AI captions", d:"Turn a rough idea into a polished caption, adapted to each platform's length." },
