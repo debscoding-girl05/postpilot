@@ -299,6 +299,13 @@ class TikTokPlatform(BasePlatform):
                         await asyncio.sleep(1)
 
                 if not typed:
+                    if await _is_blocked(page):
+                        await _dump_debug(page, "tiktok_blocked")
+                        raise RuntimeError(
+                            "TikTok served its anti-bot error page ('Une erreur est survenue'). "
+                            "TikTok blocks automated uploads even from a real logged-in browser — "
+                            f"post this one manually (video + caption are ready). (screenshot: {DEBUG_SHOT})"
+                        )
                     await _dump_debug(page, "caption_not_set")
                     raise RuntimeError(
                         f"TikTok caption did not update (field shows '{last_got[:40]}'); "
