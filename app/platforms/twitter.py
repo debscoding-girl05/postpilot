@@ -74,6 +74,22 @@ async def _find(page, selectors, timeout=15000):
         await asyncio.sleep(0.4)
 
 
+async def _robust_click(el) -> bool:
+    """Click that survives overlays/animations: normal click, then force, then JS."""
+    for attempt in ("normal", "force", "js"):
+        try:
+            if attempt == "normal":
+                await el.click(timeout=8000)
+            elif attempt == "force":
+                await el.click(force=True, timeout=8000)
+            else:
+                await el.evaluate("e => (e.closest('button,[role=button]') || e).click()")
+            return True
+        except Exception:
+            continue
+    return False
+
+
 async def _wait_enabled(page, selectors, timeout=180000):
     """Wait for the Post button to become clickable (X disables it until the
     caption is non-empty and any media finishes uploading)."""
@@ -117,7 +133,11 @@ class TwitterPlatform(BasePlatform):
             if editor is None:
                 await _dump(page, "no_editor")
                 raise RuntimeError(f"Could not find the X composer (screenshot: {DEBUG_SHOT})")
-            await editor.click()
+            # Focus rather than click — the modal backdrop can intercept a real click.
+            try:
+                await editor.focus()
+            except Exception:
+                await _robust_click(editor)
             await page.keyboard.type(caption, delay=10)
             await asyncio.sleep(1)
 
@@ -136,7 +156,9 @@ class TwitterPlatform(BasePlatform):
                 raise RuntimeError(
                     f"X Post button never enabled (upload may have failed; screenshot: {DEBUG_SHOT})"
                 )
-            await post_btn.click()
+            if not await _robust_click(post_btn):
+                await _dump(page, "post_click_failed")
+                raise RuntimeError(f"Could not click X Post button (screenshot: {DEBUG_SHOT})")
             await asyncio.sleep(8)  # let the post commit / modal close
             return "posted"
 

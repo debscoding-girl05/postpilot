@@ -70,6 +70,26 @@ OK_DIALOG_SELECTORS = [
     "button:has-text('Ok')",
 ]
 LOGGED_OUT_MARKERS = ("/accounts/login", "/accounts/emailsignup")
+LOGIN_FORM_SELECTORS = [
+    "input[name='username']",
+    "input[name='password']",
+    "a:has-text('Log in')",
+    "a:has-text('Se connecter')",
+]
+
+
+async def _logged_out(page) -> bool:
+    if any(m in page.url for m in LOGGED_OUT_MARKERS):
+        return True
+    # IG's logged-out home stays at instagram.com/ but shows a login form.
+    for sel in LOGIN_FORM_SELECTORS:
+        try:
+            el = await page.query_selector(sel)
+            if el and await el.is_visible():
+                return True
+        except Exception:
+            continue
+    return False
 
 
 async def _find(page, selectors, timeout=12000):
@@ -132,7 +152,7 @@ class InstagramPlatform(BasePlatform):
         async with cdp_page() as page:
             await page.goto(HOME_URL, wait_until="domcontentloaded", timeout=60000)
             await asyncio.sleep(3)
-            if any(m in page.url for m in LOGGED_OUT_MARKERS):
+            if await _logged_out(page):
                 raise InstagramSessionExpired(
                     "Not logged into Instagram — log in at instagram.com in the PostPilot Chrome window"
                 )
